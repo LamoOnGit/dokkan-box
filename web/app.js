@@ -297,7 +297,7 @@ function openCard(id) {
 }
 
 $('#help').onclick = () => openSheet(`<div class="help"><h2 style="font-family:'Bebas Neue';font-size:30px;font-weight:400;margin:0">Les mots du jeu</h2><dl>
-  <dt>Leader</dt><dd>La carte en tête d'équipe. Son leader skill booste les cartes de certaines catégories ou de certains types. Avant chaque combat, tu empruntes aussi le leader d'un ami : son bonus s'ajoute à celui de ton leader. L'optimiseur te dit lequel chercher dans ta liste d'amis.</dd>
+  <dt>Leader</dt><dd>La carte en tête d'équipe. Son leader skill booste les cartes de certaines catégories ou de certains types. Avant chaque combat, tu empruntes aussi le leader d'un ami : son bonus s'ajoute à celui de ton leader. L'optimiseur construit la team avec ton leader seulement, puis te conseille les amis à choisir en priorité.</dd>
   <dt>Boost (+200 %)</dt><dd>Ce que le leader ajoute aux stats d'une carte. Une carte « hors leader » ne reçoit rien : à éviter.</dd>
   <dt>Liens</dt><dd>Des bonus qui s'activent quand deux cartes côte à côte ont le même lien. Plus elles en partagent, plus elles tapent fort.</dd>
   <dt>Rotation</dt><dd>Deux cartes qui reviennent ensemble sur le terrain un tour sur deux. On y met les cartes qui partagent le plus de liens.</dd>
@@ -330,11 +330,8 @@ function mini(u, highlight) {
   const c = state.byId.get(u.id);
   let role;
   if (u.role === 'leader') role = '<div class="role lead">Leader</div>';
-  else if (u.role === 'ami') role = '<div class="role lead">Ami</div>';
-  else if (u.boost > 0) {
-    const split = u.boostL && u.boostF ? `${u.boostL} + ${u.boostF}` : u.boostF ? `ami seul` : '';
-    role = `<div class="role">+${u.boost} %${split ? ` <span class="split">(${split})</span>` : ''}</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
-  }
+  else if (u.role === 'ami') role = '<div class="role lead">Ami</div><div class="via">au choix, voir conseils</div>';
+  else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
   else role = '<div class="role off">Hors leader</div>';
   const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
   return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
@@ -357,11 +354,10 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
 
   const why = [];
   const vias = [...new Set(members.filter((u) => u.boost > 0).map((u) => u.via).filter(Boolean))];
-  const onlyFriend = members.filter((u) => u.boost > 0 && !u.boostL).length;
   why.push({ ok: boosted === members.length, txt: boosted === members.length
-    ? `Les ${members.length} cartes sont boostées${vias.length === 1 ? ` (toutes dans « ${vias[0]} »)` : ''}`
-    : `${boosted} cartes sur ${members.length} boostées par le leader` });
-  if (onlyFriend) why.push({ ok: false, txt: `${onlyFriend} carte${onlyFriend > 1 ? 's' : ''} boostée${onlyFriend > 1 ? 's' : ''} seulement par l'ami` });
+    ? `Les ${members.length} cartes sont boostées par ton leader${vias.length === 1 ? ` (toutes dans « ${vias[0]} »)` : ''}`
+    : `${boosted} cartes sur ${members.length} boostées par ton leader` });
+
   t.rotations.forEach((r, k) => {
     const names = shared(units[r[0]], units[r[1]]);
     const n = names.length; const tot = linkTotals(names);
@@ -414,10 +410,19 @@ function linksDetail(names) {
 }
 
 function friendLine(t, L) {
-  const F = state.byId.get(t.friend);
-  if (!F || F.id === L.id) return '<p class="friend">Ami : prends un ami qui a le même leader.</p>';
-  const pct = Math.max(...(F.leader || []).map((c) => c.pct), 0);
-  return `<p class="friend">Ami à emprunter : <b>${esc(F.name)}</b> <span class="muted">(${esc(F.title)}, +${pct} % aux ${esc(leaderTarget(F))})</span></p>`;
+  const fr = (t.friends || []).filter((f) => state.byId.get(f.id));
+  if (!fr.length) return '';
+  const item = (f, k) => {
+    const F = state.byId.get(f.id);
+    const all = f.covered === f.total;
+    return `<li data-id="${esc(f.id)}"><span class="rank-n">${k + 1}</span>${art(F)}
+      <div><div class="nm">${esc(F.name)}${F.id === L.id ? ' <span class="muted">(même leader)</span>' : ''}</div>
+      <div class="sub">${esc(F.title)} · +${f.pct} %${f.via ? ` aux ${esc(f.via)}` : ''}</div>
+      <div class="sub ${all ? 'ok' : 'warn'}">Booste ${all ? 'toute la team' : `${f.covered} cartes sur ${f.total}`}</div></div></li>`;
+  };
+  return `<div class="friends"><div class="group-h">Amis à choisir en priorité</div>
+    <p class="group-sub">Leur leader skill s'ajoute au tien. Cherche-les dans ta liste d'amis ou d'invités.</p>
+    <ol>${fr.map(item).join('')}</ol></div>`;
 }
 
 function leaderTarget(L) {
@@ -486,7 +491,7 @@ $('#run-watch').onclick = async () => {
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 

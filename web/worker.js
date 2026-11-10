@@ -17,8 +17,7 @@ self.onmessage = (e) => {
           baseTeams: top.map(slimTeam),
           upgrades: w.upgrades.map((g) => ({
             id: g.card.id, value: g.value,
-            teams: g.teams.map((t) => ({ leader: t.leader.id,
-    friend: t.friend ? t.friend.id : t.leader.id, replaced: t.replaced?.id, pct: t.pct })),
+            teams: g.teams.map((t) => ({ leader: t.leader.id, replaced: t.replaced?.id, pct: t.pct })),
           })),
           leaders: w.leaders.map((l) => ({ id: l.card.id, pct: l.pct, team: slimTeam(l.team) })),
         },
@@ -33,10 +32,10 @@ function slimTeam(t) {
   return {
     score: t.score,
     leader: t.leader.id,
-    friend: t.friend ? t.friend.id : t.leader.id,
+    friends: (t.friends || []).map((f) => ({ id: f.card.id, covered: f.covered, total: f.total, pct: f.pct, via: f.via })),
     boostedCount: t.boostedCount,
     tips: investTips(t),
     rotations: t.rotations,
-    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, boostL: u.boostL, boostF: u.boostF, via: u.via, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
+    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, via: u.via, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
   };
 }

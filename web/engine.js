@@ -182,38 +182,40 @@ function* combinations(arr, k, start = 0, acc = []) {
   }
 }
 
+// Amis à choisir en priorité : leaders du jeu qui boostent le plus de cartes de la team, et le plus fort
+// (le score de la team ne compte que TON leader ; l'ami est un conseil à part)
+export function recommendFriends(team, allLeaders, n = 3) {
+  const cards = team.units.filter((u) => u.role !== 'ami').map((u) => u.card);
+  const out = [];
+  for (const F of allLeaders) {
+    let covered = 0; let pct = 0;
+    for (const c of cards) { const b = leaderBoost(F, c); if (b > 0) { covered++; pct = Math.max(pct, b); } }
+    if (!covered) continue;
+    const via = boostReason(F, cards.find((c) => leaderBoost(F, c) > 0) || cards[0]);
+    out.push({ card: F, covered, total: cards.length, pct, via: via?.why || null, value: covered * 1000 + pct });
+  }
+  out.sort((a, b) => b.value - a.value);
+  // un seul conseil par nom de personnage
+  const seen = new Set();
+  return out.filter((f) => (seen.has(f.card.name) ? false : seen.add(f.card.name))).slice(0, n);
+}
+
 // pool : [{card, own}] ; leader : {card, own}
-// Boost total : le leader skill du leader + celui de l'ami s'additionnent
-export function teamBoost(L, F, card) {
-  return leaderBoost(L, card) + (F ? leaderBoost(F, card) : 0);
-}
-
-// Leaders amis possibles (n'importe quelle carte du jeu) pour un leader donné
-export function friendCandidates(L, allLeaders, n = 4) {
-  const cats = new Set([...L.categories, ...(L.leader || []).flatMap((cl) => cl.cats)]);
-  return allLeaders
-    .filter((F) => F.id !== L.id && F.leader.some((cl) => cl.cats.some((c) => cats.has(c)) || cl.allTypes))
-    .sort((a, b) => leaderMax(b) - leaderMax(a))
-    .slice(0, n);
-}
-
-export function bestTeamForLeader(leader, pool, { candidates = 12, friend = null } = {}) {
+export function bestTeamForLeader(leader, pool, { candidates = 12 } = {}) {
   const L = leader.card;
-  const F = friend || L;
   const mk = (card, own, role) => {
-    const rl = boostReason(L, card); const rf = boostReason(F, card);
+    const r = boostReason(L, card);
     return {
-      card, own, role, pw: power(card, own), boost: teamBoost(L, F, card), lf: linkFactor(own),
-      boostL: rl ? rl.pct : 0, boostF: rf ? rf.pct : 0, via: (rl || rf || {}).why || null,
+      card, own, role, pw: power(card, own), boost: r ? r.pct : 0, lf: linkFactor(own), via: r ? r.why : null,
     };
   };
   const leadU = mk(L, leader.own, 'leader');
-  const friendU = mk(F, FRIEND_OWN, 'ami');
+  const friendU = mk(L, FRIEND_OWN, 'ami'); // place de l'ami : comptée comme un leader équivalent
 
   // Une carte par nom de personnage (règle du jeu), hors nom du leader
   const byName = new Map();
   for (const p of pool) {
-    if (p.card.id === L.id || p.card.name === L.name || p.card.name === F.name) continue;
+    if (p.card.id === L.id || p.card.name === L.name) continue;
     const u = mk(p.card, p.own, 'membre');
     u.pre = u.pw * (1 + u.boost / 100) * (1 + 0.02 * sharedLinks(L, p.card));
     const prev = byName.get(p.card.name);
@@ -232,7 +234,6 @@ export function bestTeamForLeader(leader, pool, { candidates = 12, friend = null
     if (!best || res.score > best.score) best = res;
   }
   best.leader = L;
-  best.friend = F;
   best.boostedCount = best.units.filter((u) => u.role === 'membre' && u.boost > 0).length;
   return best;
 }
@@ -250,26 +251,23 @@ export function ownedPool(cards, box) {
 export function optimize(cards, box, { focusCategory = null, focusClass = null, limit = 10, onProgress } = {}) {
   let pool = ownedPool(cards, box);
   if (focusClass) pool = pool.filter((p) => p.card.class === focusClass);
-  const allLeaders = cards.filter((c) => leaderMax(c) >= 150);
   let leaders = pool.filter((p) => leaderMax(p.card) > 0);
   if (focusCategory) leaders = leaders.filter((p) => p.card.leader.some((cl) => cl.cats.includes(focusCategory)));
   const teams = [];
   leaders.forEach((l, i) => {
     let usable = pool;
     if (focusCategory) usable = pool.filter((p) => p.card.categories.includes(focusCategory));
-    // On teste le leader en double (ami = même carte) et les meilleurs leaders amis compatibles
-    let t = null;
-    for (const F of [null, ...friendCandidates(l.card, allLeaders)]) {
-      const r = bestTeamForLeader(l, usable, { friend: F, candidates: F ? 10 : 12 });
-      if (r && (!t || r.score > t.score)) t = r;
-    }
+    const t = bestTeamForLeader(l, usable);
     if (t) teams.push(t);
     if (onProgress && i % 10 === 0) onProgress(i / leaders.length);
   });
   teams.sort((a, b) => b.score - a.score);
   // Une seule équipe par nom de leader dans le classement
   const seen = new Set();
-  return teams.filter((t) => (seen.has(t.leader.name + t.leader.leaderSkill) ? false : seen.add(t.leader.name + t.leader.leaderSkill))).slice(0, limit);
+  const top = teams.filter((t) => (seen.has(t.leader.name + t.leader.leaderSkill) ? false : seen.add(t.leader.name + t.leader.leaderSkill))).slice(0, limit);
+  const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
+  for (const t of top) t.friends = recommendFriends(t, allLeaders);
+  return top;
 }
 
 // À surveiller : cartes manquantes qui améliorent le plus tes équipes, et leaders à aller chercher
@@ -281,18 +279,17 @@ export function watchlist(cards, box, topTeams, { onProgress } = {}) {
   const gains = new Map();
   topTeams.slice(0, 5).forEach((team, ti) => {
     const L = team.units[0].card;
-    const F = team.friend || L;
     const base = team.score;
     const members = team.units.slice(2);
     const teamNames = new Set(team.units.map((u) => u.card.name));
     for (const c of missing) {
-      const boost = teamBoost(L, F, c);
+      const boost = leaderBoost(L, c);
       if (boost <= 0) continue;
       const u = { card: c, own: FRESH_OWN, role: 'membre', pw: power(c, FRESH_OWN), boost, lf: linkFactor(FRESH_OWN) };
       let bestDelta = 0; let replaced = null;
       for (let r = 0; r < members.length; r++) {
         if (teamNames.has(c.name) && members[r].card.name !== c.name) continue;
-        if (c.name === L.name || c.name === F.name) continue;
+        if (c.name === L.name) continue;
         const next = team.units.slice(0, 2).concat(members.map((m, j) => (j === r ? u : m)));
         const s = scoreTeam(next).score;
         if (s - base > bestDelta) { bestDelta = s - base; replaced = members[r].card; }
