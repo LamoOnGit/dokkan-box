@@ -59,7 +59,13 @@
           <select id="f-rarity" aria-label="Rareté"><option value="">LR et UR</option><option value="LR">LR seulement</option><option value="UR">UR seulement</option></select>
           <select id="f-cat" aria-label="Catégorie"><option value="">Toutes les catégories</option></select>
         </div>
+        <div class="row">
+          <select id="f-sort" aria-label="Trier"><option value="recent">Les plus récentes d'abord</option><option value="type">Par type, comme en jeu</option><option value="name">Par nom</option></select>
+          <button id="quick" class="ghost" type="button" aria-pressed="false">Ajout rapide</button>
+        </div>
       </div>
+      <div id="quick-bar" class="quick-bar" hidden>Ajout rapide activé : touche une carte pour l'ajouter, touche encore pour un exemplaire de plus. Le − en retire un.</div>
+      <div id="bulk" class="bulk" hidden></div>
       <p class="count muted" id="box-count"></p>
       <div class="grid" id="grid"></div>
       <button id="more" class="ghost block" type="button" hidden>Afficher plus de cartes</button>
@@ -67,6 +73,7 @@
 
     <!-- Onglet Optimiseur -->
     <section id="tab-opt" class="tab" hidden>
+      <div id="saved"></div>
       <div class="intro">
         <h2>Tes meilleures teams</h2>
         <p class="muted">L'optimiseur teste chaque leader de ta box et choisit les 5 cartes qui vont le mieux avec lui.</p>
@@ -90,12 +97,17 @@
       </div>
       <div id="watch-results"></div>
     </section>
+    <!-- Onglet Actu -->
+    <section id="tab-news" class="tab" hidden>
+      <div id="news"></div>
+    </section>
   </main>
 
   <nav class="tabs" id="tabs" hidden>
     <button data-tab="box" class="active" type="button"><span class="ico">▦</span>Ma box</button>
     <button data-tab="opt" type="button"><span class="ico">⚡</span>Mes teams</button>
     <button data-tab="watch" type="button"><span class="ico">✦</span>À invoquer</button>
+    <button data-tab="news" type="button"><span class="ico">✷</span>Actu</button>
   </nav>
 
   <!-- Feuille du bas (fiche carte / aide) -->

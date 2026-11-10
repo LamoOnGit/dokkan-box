@@ -5,6 +5,8 @@ const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
 const LOCAL_KEY = 'dokkan-box-v1';
 const GUIDE_KEY = 'dokkan-guide-hidden';
+const TEAMS_KEY = 'dokkan-teams-v1';
+const TYPE_ORDER = { AGL: 0, TEQ: 1, INT: 2, STR: 3, PHY: 4 };
 const POTENTIAL = ['≈ 40 %', '≈ 60 %', '≈ 75 %', '≈ 90 %', '100 %'];
 
 const $ = (s) => document.querySelector(s);
@@ -14,7 +16,7 @@ const state = {
   cards: [], byId: new Map(), categories: [], meta: {},
   box: {}, user: null, sb: null,
   filters: { q: '', types: new Set(), rarity: '', cat: '', cls: '', owned: false },
-  shown: PAGE, ranOptimizer: false,
+  shown: PAGE, ranOptimizer: false, quick: false, sort: 'recent', saved: [], lastTeams: [], bulkArmed: false, lastBulk: null,
 };
 
 const ownedCount = () => Object.values(state.box).filter((o) => o.count > 0).length;
@@ -31,6 +33,7 @@ async function loadCards() {
   state.cards.forEach((c) => c.categories.forEach((k) => cats.add(k)));
   state.categories = [...cats].sort((a, b) => a.localeCompare(b));
   $('#demo-banner').hidden = !data.demo;
+  try { const r = await fetch('data/extra.json', { cache: 'no-cache' }); state.extra = r.ok ? await r.json() : null; } catch { state.extra = null; }
   const date = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('fr-FR') : '?';
   $('#credits').innerHTML = `${state.cards.length} cartes LR et UR Global, mises à jour le ${date}. Source : ${esc(data.source || 'wiki Dokkan')}.`;
 }
@@ -38,22 +41,33 @@ async function loadCards() {
 /* ---------- Sauvegarde ---------- */
 let saveTimer = null;
 function saveBox() {
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(state.box)); } catch { /* stockage indisponible */ }
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(state.box));
+    localStorage.setItem(TEAMS_KEY, JSON.stringify(state.saved));
+  } catch { /* stockage indisponible */ }
   if (!state.sb || !state.user) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    const { error } = await state.sb.from('dokkan_box').upsert({ user_id: state.user.id, box: state.box, updated_at: new Date().toISOString() });
+    const row = { user_id: state.user.id, box: state.box, teams: state.saved, updated_at: new Date().toISOString() };
+    let { error } = await state.sb.from('dokkan_box').upsert(row);
+    if (error && /teams/.test(error.message || '')) {
+      delete row.teams; // colonne pas encore créée : on garde au moins la box
+      ({ error } = await state.sb.from('dokkan_box').upsert(row));
+    }
     if (error) toast('Sauvegarde en ligne impossible, réessaie plus tard');
   }, 700);
 }
 
 async function loadBox() {
-  let local = {};
+  let local = {}; let teams = [];
   try { local = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}'); } catch { local = {}; }
-  state.box = local;
+  try { teams = JSON.parse(localStorage.getItem(TEAMS_KEY) || '[]'); } catch { teams = []; }
+  state.box = local; state.saved = Array.isArray(teams) ? teams : [];
   if (state.sb && state.user) {
-    const { data, error } = await state.sb.from('dokkan_box').select('box').eq('user_id', state.user.id).maybeSingle();
-    if (!error && data) state.box = data.box || {};
+    let res = await state.sb.from('dokkan_box').select('box, teams').eq('user_id', state.user.id).maybeSingle();
+    if (res.error) res = await state.sb.from('dokkan_box').select('box').eq('user_id', state.user.id).maybeSingle();
+    const { data, error } = res;
+    if (!error && data) { state.box = data.box || {}; if (Array.isArray(data.teams)) state.saved = data.teams; }
     else if (!error && !data && Object.keys(local).length) saveBox();
   }
 }
@@ -107,6 +121,7 @@ async function startApp() {
   renderFilters();
   renderGuide();
   renderGrid();
+  renderSaved();
 }
 
 /* ---------- Visuels ---------- */
@@ -174,10 +189,74 @@ function renderFilters() {
   $('#seg-mine').onclick = () => seg(true);
   $('#more').onclick = () => { state.shown += PAGE; renderGrid(); };
   $('#grid').onclick = (e) => {
+    const sub = e.target.closest('[data-sub]');
+    if (sub) { removeOne(sub.dataset.sub); return; }
     const add = e.target.closest('[data-add]');
     if (add) { addCard(add.dataset.add); return; }
-    const el = e.target.closest('[data-id]'); if (el) openCard(el.dataset.id);
+    const el = e.target.closest('[data-id]'); if (!el) return;
+    if (state.quick) addCard(el.dataset.id); else openCard(el.dataset.id);
   };
+  $('#f-sort').onchange = (e) => { state.sort = e.target.value; resetGrid(); };
+  $('#quick').onclick = () => {
+    state.quick = !state.quick;
+    $('#quick').classList.toggle('on', state.quick);
+    $('#quick').setAttribute('aria-pressed', state.quick);
+    $('#quick').textContent = state.quick ? 'Ajout rapide : activé' : 'Ajout rapide';
+    $('#quick-bar').hidden = !state.quick;
+    renderGrid();
+  };
+  $('#bulk').onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.act === 'undo') { undoBulk(); return; }
+    if (!state.bulkArmed) { state.bulkArmed = true; renderBulk(); return; }
+    bulkAdd();
+  };
+}
+
+function removeOne(id) {
+  const cur = state.box[id]; if (!cur) return;
+  if (cur.count <= 1) delete state.box[id]; else state.box[id] = { ...cur, count: cur.count - 1 };
+  saveBox(); refreshTile(id); updateCounts();
+  toast(state.box[id] ? `${state.box[id].count} exemplaire${state.box[id].count > 1 ? 's' : ''}` : 'Retirée de ta box');
+}
+
+function bulkTargets() { return filtered().filter((c) => !(state.box[c.id]?.count > 0)); }
+function filtersActive() { const f = state.filters; return Boolean(f.q || f.types.size || f.rarity || f.cls || f.cat); }
+function renderBulk() {
+  const el = $('#bulk');
+  if (state.lastBulk) {
+    el.hidden = false;
+    el.innerHTML = `<span>${state.lastBulk.length} cartes ajoutées à ta box.</span><button class="ghost small" data-act="undo" type="button">Annuler</button>`;
+    return;
+  }
+  const n = bulkTargets().length;
+  if (state.filters.owned || !filtersActive() || !n || n > 300) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = state.bulkArmed
+    ? `<span>Ajouter ces ${n} cartes à ta box ?</span><button class="small" type="button">Oui, ajouter les ${n}</button>`
+    : `<span>Tu as toutes ces cartes ?</span><button class="ghost small" type="button">Tout ajouter (${n})</button>`;
+}
+function bulkAdd() {
+  const ids = bulkTargets().map((c) => c.id);
+  ids.forEach((id) => { state.box[id] = { count: 1, linkLv: 1, saLv: 1 }; });
+  state.bulkArmed = false; state.lastBulk = ids;
+  saveBox(); renderGrid();
+  toast(`${ids.length} cartes ajoutées`);
+  setTimeout(() => { if (state.lastBulk === ids) { state.lastBulk = null; renderBulk(); } }, 10000);
+}
+function undoBulk() {
+  (state.lastBulk || []).forEach((id) => { delete state.box[id]; });
+  state.lastBulk = null; saveBox(); renderGrid(); toast('Ajout annulé');
+}
+
+function sortList(list) {
+  const date = (c) => c.globalDate || '';
+  if (state.sort === 'name') return list.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (state.sort === 'type') {
+    return list.slice().sort((a, b) => (TYPE_ORDER[a.type] - TYPE_ORDER[b.type])
+      || ((a.rarity === 'LR' ? 0 : 1) - (b.rarity === 'LR' ? 0 : 1)) || date(b).localeCompare(date(a)));
+  }
+  return list.slice().sort((a, b) => date(b).localeCompare(date(a)) || a.name.localeCompare(b.name));
 }
 
 function addCard(id) {
@@ -202,9 +281,9 @@ function resetGrid() { state.shown = PAGE; renderGrid(); }
 function tile(c) {
   const own = state.box[c.id];
   const corner = own?.count
-    ? `<span class="qty" title="${own.count} exemplaire(s)">${orbNum(own.count)}</span>`
+    ? `<span class="qty" title="${own.count} exemplaire(s)">${orbNum(own.count)}</span>${state.quick ? `<button class="minus" data-sub="${esc(c.id)}" type="button" aria-label="Retirer un exemplaire de ${esc(c.name)}">−</button>` : ''}`
     : `<button class="add" data-add="${esc(c.id)}" type="button" aria-label="Ajouter ${esc(c.name)} à ma box">+</button>`;
-  return `<div class="tile${own?.count ? ' owned' : ''}" data-tile="${esc(c.id)}">
+  return `<div class="tile${own?.count ? ' owned' : ''}${state.quick ? ' quick' : ''}" data-tile="${esc(c.id)}">
     <button class="open" data-id="${esc(c.id)}" type="button" aria-label="Voir ${esc(c.name)}">
       ${art(c)}<div class="nm">${esc(c.name)}</div><div class="tt">${esc(c.rarity)} · ${esc(c.title)}</div></button>
     ${typeBadge(c)}${corner}</div>`;
@@ -220,8 +299,10 @@ function updateCounts() {
 }
 
 function renderGrid() {
-  const list = filtered();
+  const list = sortList(filtered());
   updateCounts();
+  if (!state.lastBulk) state.bulkArmed = false;
+  renderBulk();
   if (!list.length) {
     $('#grid').innerHTML = state.filters.owned && !ownedCount()
       ? '<div class="empty" style="grid-column:1/-1"><b>Ta box est vide</b>Passe sur « Toutes les cartes » et touche le + sur celles que tu possèdes.</div>'
@@ -342,7 +423,7 @@ function shared(a, b) {
   return la.filter((l) => lb.includes(l));
 }
 
-function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
+function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = null, savedIdx = null } = {}) {
   const L = state.byId.get(t.leader);
   const units = t.units;
   const rotIdx = new Set(t.rotations.flat());
@@ -367,7 +448,12 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
   const group = (title, sub, list, hint, extra = '') => `<div class="group"><div class="group-h">${title}${hint ? `<small>${hint}</small>` : ''}</div>
     <p class="group-sub">${sub}</p><div class="slot-row">${list.map((u) => mini(u, highlight)).join('')}</div>${extra}</div>`;
 
-  return `<article class="team${i === 0 && !highlight ? ' best' : ''}">
+  const key = teamKey(t);
+  const isSaved = state.saved.some((x) => teamKey(x) === key);
+  const saveBtn = savedIdx !== null
+    ? `<button class="danger block" data-unsave="${savedIdx}" type="button">Supprimer cette team</button>`
+    : saveIdx !== null ? `<button class="${isSaved ? 'ghost' : ''} block" data-save="${saveIdx}" type="button"${isSaved ? ' disabled' : ''}>${isSaved ? 'Team enregistrée' : 'Enregistrer cette team'}</button>` : '';
+  return `<article class="team${i === 0 && !highlight && savedIdx === null ? ' best' : ''}">
     <div class="team-head">${art(L)}
       <div><div class="team-tag">${tag || (i === 0 ? 'Ta meilleure team' : `Team n° ${i + 1}`)}</div>
       <div class="team-lead">${esc(L.name)}</div><div class="muted small-text">Leader : +${maxPct} % aux ${esc(leaderTarget(L))}</div></div></div>
@@ -380,11 +466,33 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
     ${linkPlanHtml(t)}
     ${tipsHtml(t)}
+    ${saveBtn}
   </article>`;
 }
 
 // Liens à monter : pour chaque carte, ses liens les plus utiles DANS cette team
 // (partagés avec son partenaire de rotation = priorité, puis avec le plus de coéquipiers)
+function teamKey(t) { return t.units.filter((u) => u.role !== 'ami').map((u) => u.id).sort().join('-'); }
+
+function renderSaved() {
+  const el = $('#saved');
+  if (!state.saved.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<h2 class="sec-h" style="margin-top:4px">Mes teams enregistrées</h2>
+    ${state.saved.map((t, k) => {
+      const L = state.byId.get(t.leader); if (!L) return '';
+      const d = t.savedAt ? new Date(t.savedAt).toLocaleDateString('fr-FR') : '';
+      return `<details class="lead-pick saved-team"><summary class="item">${art(L)}
+        <div><div class="nm">${esc(L.name)}</div><div class="sub">${esc(t.label || '')}</div><div class="sub more-lbl">Voir la team</div></div>
+        <div class="gain" style="color:var(--text)">${Math.round(t.score)}<small>enregistrée le ${d}</small></div></summary>
+        ${teamHtml(t, k, { savedIdx: k, tag: 'Team enregistrée' })}</details>`;
+    }).join('')}`;
+}
+
+function teamLabel(t) {
+  const vias = [...new Set(t.units.filter((u) => u.role === 'membre' && u.via).map((u) => u.via))];
+  return vias.length === 1 ? `Team ${vias[0]}` : `Leader : ${state.byId.get(t.leader)?.title || ''}`;
+}
+
 function linkPlan(t) {
   const units = t.units;
   const partner = new Map();
@@ -475,9 +583,10 @@ $('#run-opt').onclick = async () => {
   try {
     const teams = await run('optimize', { focusCategory: $('#o-cat').value || null, focusClass: $('#o-cls').value || null, limit: 10 }, (p) => bar(prog, p));
     state.ranOptimizer = true; renderGuide();
+    state.lastTeams = teams;
     const best = teams[0]?.score;
     $('#opt-results').innerHTML = teams.length
-      ? teams.map((t, i) => teamHtml(t, i, { best })).join('')
+      ? teams.map((t, i) => teamHtml(t, i, { best, saveIdx: i })).join('')
       : `<div class="empty"><b>Pas de team possible</b>${$('#o-cat').value || $('#o-cls').value ? 'Aucun leader de ta box ne correspond à ces choix. Essaie une autre catégorie ou classe.' : 'Aucune carte de ta box n’a de leader skill.'}</div>`;
   } catch (e) {
     $('#opt-results').innerHTML = `<div class="empty"><b>Le calcul a échoué</b>${esc(e.message)}</div>`;
@@ -490,6 +599,8 @@ $('#run-watch').onclick = async () => {
   const prog = $('#watch-progress'); bar(prog, 0);
   try {
     const r = await run('watch', {}, (p) => bar(prog, p));
+    state.gains = new Map(r.upgrades.map((g) => [g.id, Math.max(...g.teams.map((t) => t.pct))]));
+    r.leaders.forEach((l) => { if (!state.gains.has(l.id)) state.gains.set(l.id, l.pct); });
     const best = r.baseTeams[0];
     const bestLead = best ? state.byId.get(best.leader) : null;
     let html = '<h2 class="sec-h">Cartes qui renforcent tes teams</h2><p class="sec-p">Le gain de puissance si tu l\'avais dans ta team, à la place de sa carte la plus faible.</p>';
@@ -519,17 +630,69 @@ $('#run-watch').onclick = async () => {
 };
 
 document.addEventListener('click', (e) => {
+  const sv = e.target.closest('[data-save]');
+  if (sv) {
+    const t = state.lastTeams[Number(sv.dataset.save)]; if (!t) return;
+    state.saved.unshift({ ...t, label: teamLabel(t), savedAt: new Date().toISOString() });
+    saveBox(); renderSaved();
+    sv.textContent = 'Team enregistrée'; sv.disabled = true; sv.classList.add('ghost');
+    toast('Team enregistrée'); return;
+  }
+  const us = e.target.closest('[data-unsave]');
+  if (us) {
+    if (us.dataset.armed !== '1') { us.dataset.armed = '1'; us.textContent = 'Confirmer la suppression'; return; }
+    state.saved.splice(Number(us.dataset.unsave), 1);
+    saveBox(); renderSaved(); toast('Team supprimée'); return;
+  }
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
+
+/* ---------- Onglet Actu ---------- */
+const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '');
+function chip(id, note = '') {
+  const c = state.byId.get(id); if (!c) return '';
+  const own = state.box[id]?.count > 0;
+  const gain = state.gains?.get(id);
+  const tag = own ? '<div class="role">Dans ta box</div>'
+    : gain > 0 ? `<div class="role">+${gain.toFixed(1)} % pour toi</div>` : `<div class="via">${esc(c.rarity)} · ${esc(c.title)}</div>`;
+  return `<div class="mini${own ? ' have' : ''}" data-id="${esc(id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${tag}${note ? `<div class="via">${esc(note)}</div>` : ''}</div>`;
+}
+function renderNews() {
+  const x = state.extra || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = state.cards.filter((c) => c.globalDate > today).sort((a, b) => a.globalDate.localeCompare(b.globalDate));
+  const ezaSoon = state.cards.filter((c) => c.ezaDate && c.ezaDate > today);
+  const since = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
+  const ezaRecent = state.cards.filter((c) => c.ezaDate && c.ezaDate <= today && c.ezaDate >= since).sort((a, b) => b.ezaDate.localeCompare(a.ezaDate));
+  const sec = (title, sub, body) => `<section class="news-sec"><h2 class="sec-h">${title}</h2>${sub ? `<p class="sec-p">${sub}</p>` : ''}${body}</section>`;
+  const row = (ids, notes = {}) => `<div class="slot-row">${ids.map((id) => chip(id, notes[id] || '')).join('')}</div>`;
+  let html = '';
+  html += sec('Bientôt sur Global', 'Les nouvelles cartes déjà annoncées, avec leur date de sortie.',
+    soon.length ? row(soon.map((c) => c.id), Object.fromEntries(soon.map((c) => [c.id, `Sort le ${frDate(c.globalDate)}`])))
+      : '<p class="empty">Aucune nouvelle carte annoncée pour le moment.</p>');
+  html += sec('EZA à venir et récentes', 'Les cartes qui viennent de recevoir (ou vont recevoir) un Extreme Z-Awakening. Si tu les as, pense à les réveiller.',
+    (ezaSoon.length || ezaRecent.length) ? row([...ezaSoon, ...ezaRecent].map((c) => c.id), Object.fromEntries([...ezaSoon, ...ezaRecent].map((c) => [c.id, `${c.ezaKind || 'EZA'} ${c.ezaDate > today ? 'le' : 'depuis le'} ${frDate(c.ezaDate)}`])))
+      : '<p class="empty">Aucune EZA récente.</p>');
+  const banners = (x.summons || []).filter((b) => !b.end || b.end >= new Date().toISOString());
+  html += sec('Bannières en cours', state.gains ? 'Le % indique ce que la carte apporterait à tes teams.' : 'Lance « À invoquer » pour voir ce que chaque carte apporterait à tes teams.',
+    banners.length ? banners.map((b) => `<div class="banner-card"><div class="bn-h"><b>${esc(b.name)}</b><span>jusqu'au ${frDate(b.end)}</span></div>${row(b.cards)}</div>`).join('')
+      : '<p class="empty">Pas d\'info sur les bannières pour le moment.</p>');
+  const tl = (x.tierlist || []).slice(0, 6);
+  if (tl.length) html += sec('Tier list du moment', 'Les cartes les mieux classées en ce moment (source : DokkanStats).',
+    tl.map((t) => `<div class="tier"><div class="tier-h"><span class="tier-badge">${esc(t.tier)}</span><span class="muted small-text">rangs ${esc(t.ranks)}</span></div>${row(t.cards)}</div>`).join(''));
+  if ((x.news || []).length) html += sec('Nouvelles du jeu', '', `<ul class="news-list">${x.news.slice(0, 10).map((n) => `<li><a href="${esc(n.url)}" target="_blank" rel="noopener"><b>${esc(n.title)}</b><span>${frDate(n.date)}${n.tags?.length ? ' · ' + esc(n.tags.join(', ')) : ''}</span></a></li>`).join('')}</ul>`);
+  $('#news').innerHTML = html;
+}
 
 /* ---------- Onglets ---------- */
 function switchTab(name) {
   document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
-  ['box', 'opt', 'watch'].forEach((t) => { $(`#tab-${t}`).hidden = t !== name; });
+  ['box', 'opt', 'watch', 'news'].forEach((t) => { $(`#tab-${t}`).hidden = t !== name; });
   if (name === 'box') renderGrid();
+  if (name === 'news') renderNews();
   window.scrollTo(0, 0);
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); };

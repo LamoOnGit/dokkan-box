@@ -3,6 +3,7 @@
 create table if not exists public.dokkan_box (
   user_id uuid primary key references auth.users (id) on delete cascade,
   box jsonb not null default '{}'::jsonb,
+  teams jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -14,3 +15,6 @@ create policy "box : création perso" on public.dokkan_box
   for insert with check (auth.uid() = user_id);
 create policy "box : modification perso" on public.dokkan_box
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Si la table existe déjà (ajout des teams enregistrées) :
+alter table public.dokkan_box add column if not exists teams jsonb not null default '[]'::jsonb;
