@@ -44,6 +44,21 @@ function clauseMatches(cl, card) {
   return false;
 }
 
+// Pourquoi une carte est boostée : la catégorie (ou le type) qui la fait entrer dans le leader skill
+export function boostReason(leaderCard, card) {
+  let best = null;
+  for (const cl of leaderCard.leader || []) {
+    if (!clauseMatches(cl, card)) continue;
+    if (best && best.pct >= cl.pct) continue;
+    let why = cl.cats.find((c) => card.categories.includes(c));
+    if (!why && cl.allTypes) why = 'Tous types';
+    if (!why) { const t = cl.types.find((x) => x.type === card.type); if (t) why = `${t.cls ? t.cls + ' ' : ''}${t.type}`; }
+    if (!why && cl.classes.length) why = `Classe ${cl.classes[0]}`;
+    best = { pct: cl.pct, why };
+  }
+  return best;
+}
+
 export function leaderBoost(leaderCard, card) {
   let best = 0;
   for (const cl of leaderCard.leader || []) if (clauseMatches(cl, card)) best = Math.max(best, cl.pct);
@@ -185,9 +200,13 @@ export function friendCandidates(L, allLeaders, n = 4) {
 export function bestTeamForLeader(leader, pool, { candidates = 12, friend = null } = {}) {
   const L = leader.card;
   const F = friend || L;
-  const mk = (card, own, role) => ({
-    card, own, role, pw: power(card, own), boost: teamBoost(L, F, card), lf: linkFactor(own),
-  });
+  const mk = (card, own, role) => {
+    const rl = boostReason(L, card); const rf = boostReason(F, card);
+    return {
+      card, own, role, pw: power(card, own), boost: teamBoost(L, F, card), lf: linkFactor(own),
+      boostL: rl ? rl.pct : 0, boostF: rf ? rf.pct : 0, via: (rl || rf || {}).why || null,
+    };
+  };
   const leadU = mk(L, leader.own, 'leader');
   const friendU = mk(F, FRIEND_OWN, 'ami');
 

@@ -37,6 +37,6 @@ function slimTeam(t) {
     boostedCount: t.boostedCount,
     tips: investTips(t),
     rotations: t.rotations,
-    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
+    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, boostL: u.boostL, boostF: u.boostF, via: u.via, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
   };
 }

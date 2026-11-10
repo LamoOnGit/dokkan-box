@@ -331,7 +331,10 @@ function mini(u, highlight) {
   let role;
   if (u.role === 'leader') role = '<div class="role lead">Leader</div>';
   else if (u.role === 'ami') role = '<div class="role lead">Ami</div>';
-  else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>`;
+  else if (u.boost > 0) {
+    const split = u.boostL && u.boostF ? `${u.boostL} + ${u.boostF}` : u.boostF ? `ami seul` : '';
+    role = `<div class="role">+${u.boost} %${split ? ` <span class="split">(${split})</span>` : ''}</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
+  }
   else role = '<div class="role off">Hors leader</div>';
   const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
   return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
@@ -353,7 +356,12 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
   const maxPct = Math.max(...(L.leader || []).map((c) => c.pct), 0);
 
   const why = [];
-  why.push({ ok: boosted === members.length, txt: boosted === members.length ? `Les ${members.length} cartes sont boostées par le leader` : `${boosted} cartes sur ${members.length} boostées par le leader` });
+  const vias = [...new Set(members.filter((u) => u.boost > 0).map((u) => u.via).filter(Boolean))];
+  const onlyFriend = members.filter((u) => u.boost > 0 && !u.boostL).length;
+  why.push({ ok: boosted === members.length, txt: boosted === members.length
+    ? `Les ${members.length} cartes sont boostées${vias.length === 1 ? ` (toutes dans « ${vias[0]} »)` : ''}`
+    : `${boosted} cartes sur ${members.length} boostées par le leader` });
+  if (onlyFriend) why.push({ ok: false, txt: `${onlyFriend} carte${onlyFriend > 1 ? 's' : ''} boostée${onlyFriend > 1 ? 's' : ''} seulement par l'ami` });
   t.rotations.forEach((r, k) => {
     const names = shared(units[r[0]], units[r[1]]);
     const n = names.length; const tot = linkTotals(names);

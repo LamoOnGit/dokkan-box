@@ -204,3 +204,5 @@ input[type=range] { padding: 0; border: 0; background: transparent; accent-color
 .tips { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
 .tips li { display: flex; justify-content: space-between; gap: 10px; align-items: center; background: var(--panel2); border-radius: var(--r-md); padding: 9px 12px; font-size: 13px; cursor: pointer; }
 .tips li > b { color: var(--good); white-space: nowrap; }
+.mini .role .split { color: var(--muted); font-weight: 400; }
+.mini .via { font-size: 10px; color: var(--muted); line-height: 1.2; }
