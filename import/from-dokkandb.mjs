@@ -103,8 +103,42 @@ try {
     news: (x.news?.items || []).slice(0, 15).map((n) => ({ title: decode(n.title), url: n.url, date: n.iso || n.date, tags: n.tags || [], image: n.image || null })),
     tierlist: (x.tierlist?.tiers || []).map((t) => ({ tier: t.tier, ranks: t.ranks, cards: (t.units || []).map((u) => u.cardId).filter((id) => ids.has(id)) })),
   };
+  extra.announcedEza = await findAnnouncedEza(extra.news, cards);
   await writeFile(OUT_EXTRA, JSON.stringify(extra));
-  console.log(`Actualités : ${extra.summons.length} bannières, ${extra.news.length} nouvelles, tier list ${extra.tierlist.length} rangs`);
+  console.log(`Actualités : ${extra.summons.length} bannières, ${extra.news.length} nouvelles, tier list ${extra.tierlist.length} rangs, ${extra.announcedEza.length} EZA annoncées repérées`);
 } catch (e) {
   console.log('Actualités non mises à jour :', e.message);
+}
+
+// Repère les EZA annoncées dans les news officielles (« Information on Upcoming Content! », « Extreme Z-Awakening »…).
+// On cherche le titre exact des cartes dans le texte de la news. Sans réponse du site, on ne trouve rien et rien ne casse.
+async function findAnnouncedEza(news, cards) {
+  const wanted = (news || []).filter((n) => /upcoming|extreme z|awaken|eza/i.test(n.title)).slice(0, 6);
+  const found = new Map();
+  const today = new Date().toISOString().slice(0, 10);
+  const strip = (h) => h.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, "'").replace(/\s+/g, ' ');
+  const byTitle = cards.filter((k) => k.title && k.title.length > 8).map((k) => ({ k, t: k.title.toLowerCase() }));
+  for (const n of wanted) {
+    let text = '';
+    for (const url of [`${n.url}.md`, n.url]) {
+      try {
+        const r = await fetch(url, { headers: { 'User-Agent': 'DokkanBox/1.0 (outil perso)' } });
+        if (r.ok) { text = strip(await r.text()); if (text.length > 200) break; }
+      } catch { /* site indisponible */ }
+    }
+    if (!/extreme z-awaken|\beza\b|super extreme/i.test(text)) continue;
+    const low = text.toLowerCase();
+    for (const { k, t } of byTitle) {
+      const i = low.indexOf(t);
+      if (i < 0) continue;
+      // L'annonce doit parler d'EZA à proximité du titre de la carte
+      const around = low.slice(Math.max(0, i - 600), i + 600);
+      if (!/extreme z-awaken|\beza\b/.test(around)) continue;
+      if (k.ezaDate && k.ezaDate >= today) continue;
+      const seza = /super extreme/.test(around);
+      if (!found.has(k.id)) found.set(k.id, { id: k.id, kind: seza ? 'SEZA' : 'EZA', date: null, source: n.url });
+    }
+  }
+  return [...found.values()];
 }

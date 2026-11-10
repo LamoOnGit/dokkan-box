@@ -357,12 +357,14 @@ function openCard(id) {
       <h2>${esc(c.name)}</h2><div class="muted small-text">${esc(c.title)}</div></div></div>
     <div id="own">${ownHtml()}</div>
     <div id="fit" class="fit"><button class="block" id="fit-run" type="button">Dans quelles teams la jouer ?</button></div>
+    <div id="eza-mark"></div>
     <h3>Si elle est leader</h3><div class="small-text">${esc(c.leaderSkill || 'Pas de leader skill.').replace(/\n/g, '<br>')}</div>
     <h3>Ses liens</h3><div>${c.links.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('') || '<span class="muted small-text">Non renseignés</span>'}</div>
     <h3>Ses catégories</h3><div>${c.categories.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('')}</div>
     <div class="ext"><a href="${dokkanEssentials}" target="_blank" rel="noopener">Analyse DokkanEssentials ↗</a><a href="${wiki}" target="_blank" rel="noopener">Page du wiki ↗</a></div>`);
 
   $('#fit-run').onclick = () => runFit(id);
+  renderEzaMark(id);
   const bind = () => {
     const own = $('#own');
     own.innerHTML = ownHtml();
@@ -654,6 +656,27 @@ document.addEventListener('click', (e) => {
   if (el) openCard(el.dataset.id);
 });
 
+/* ---------- EZA annoncée (ajoutée à la main) ---------- */
+function ezaAnnounced(id) {
+  return state.box.__eza?.[id] || (state.manual?.upcomingEza || []).find((m) => m.id === id) || (state.extra?.announcedEza || []).find((m) => m.id === id) || null;
+}
+function renderEzaMark(id) {
+  const el = $('#eza-mark'); if (!el) return;
+  const c = state.byId.get(id);
+  const today = new Date().toISOString().slice(0, 10);
+  if (c.ezaDate && c.ezaDate <= today && !state.box.__eza?.[id]) { el.innerHTML = ''; return; }
+  const a = ezaAnnounced(id);
+  const mineOnly = Boolean(state.box.__eza?.[id]);
+  el.innerHTML = a
+    ? `<div class="eza-box"><b>${esc(a.kind || 'EZA')} annoncée${a.date ? ` le ${frDate(a.date)}` : ''}</b>
+        <p>Son leader skill, ses stats et son passif vont être améliorés. Tant que l'EZA n'est pas sortie, l'outil la calcule avec sa version actuelle ; dès sa sortie, ses teams sont recalculées automatiquement.</p>
+        <div class="row"><input type="date" id="eza-date" value="${esc(a.date || '')}" aria-label="Date de l'EZA">${mineOnly ? '<button class="ghost small" id="eza-del" type="button">Retirer</button>' : ''}</div></div>`
+    : `<button class="ghost block" id="eza-add" type="button">Signaler une EZA annoncée pour cette carte</button>`;
+  $('#eza-add')?.addEventListener('click', () => { state.box.__eza = { ...(state.box.__eza || {}), [id]: { kind: 'EZA', date: null } }; saveBox(); renderEzaMark(id); toast('EZA ajoutée à l\'onglet Actu'); });
+  $('#eza-date')?.addEventListener('change', (e) => { state.box.__eza = { ...(state.box.__eza || {}), [id]: { kind: a.kind || 'EZA', date: e.target.value || null } }; saveBox(); toast('Date enregistrée'); });
+  $('#eza-del')?.addEventListener('click', () => { const x = { ...(state.box.__eza || {}) }; delete x[id]; state.box.__eza = x; saveBox(); renderEzaMark(id); toast('EZA retirée'); });
+}
+
 /* ---------- Dans quelles teams jouer une carte ---------- */
 async function runFit(id) {
   const box = $('#fit'); const c = state.byId.get(id);
@@ -697,7 +720,8 @@ function renderNews() {
   const soon = state.cards.filter((c) => c.globalDate > today).sort((a, b) => a.globalDate.localeCompare(b.globalDate));
   const ezaSoon = state.cards.filter((c) => c.ezaDate && c.ezaDate > today);
   const manualNotes = {};
-  for (const m of state.manual?.upcomingEza || []) {
+  const mine = Object.entries(state.box.__eza || {}).map(([id, v]) => ({ id, kind: v.kind || 'EZA', date: v.date || null, note: 'Annoncée' }));
+  for (const m of [...(state.manual?.upcomingEza || []), ...(state.extra?.announcedEza || []), ...mine]) {
     const c = state.byId.get(m.id);
     if (!c || (c.ezaDate && (!m.date || c.ezaDate >= m.date))) continue; // déjà dans la base : on ne double pas
     if (!ezaSoon.includes(c)) ezaSoon.unshift(c);
@@ -711,7 +735,7 @@ function renderNews() {
   html += sec('Bientôt sur Global', 'Les nouvelles cartes déjà annoncées, avec leur date de sortie.',
     soon.length ? row(soon.map((c) => c.id), Object.fromEntries(soon.map((c) => [c.id, `Sort le ${frDate(c.globalDate)}`])))
       : '<p class="empty">Aucune nouvelle carte annoncée pour le moment.</p>');
-  html += sec('EZA à venir et récentes', 'Les cartes qui viennent de recevoir (ou vont recevoir) un Extreme Z-Awakening. Si tu les as, pense à les réveiller.',
+  html += sec('EZA à venir et récentes', 'Les cartes qui viennent de recevoir (ou vont recevoir) un Extreme Z-Awakening. Une EZA manque ? Ouvre la carte et touche « Signaler une EZA annoncée ».',
     (ezaSoon.length || ezaRecent.length) ? row([...ezaSoon, ...ezaRecent].map((c) => c.id), Object.fromEntries([...ezaSoon, ...ezaRecent].map((c) => [c.id, manualNotes[c.id] || `${c.ezaKind || 'EZA'} ${c.ezaDate > today ? 'le' : 'depuis le'} ${frDate(c.ezaDate)}`])))
       : '<p class="empty">Aucune EZA récente.</p>');
   const banners = (x.summons || []).filter((b) => !b.end || b.end >= new Date().toISOString());

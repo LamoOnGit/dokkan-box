@@ -249,3 +249,7 @@ input[type=range] { padding: 0; border: 0; background: transparent; accent-color
 .fit .lead-pick { background: var(--panel2); }
 .fit .lead-pick .team { background: none; }
 #sheet .team .mini { background: var(--panel); }
+.eza-box { background: #3a2a10; color: #ffd68a; border-radius: var(--r-md); padding: 12px; margin-top: 14px; font-size: 14px; }
+.eza-box p { margin: 4px 0 8px; font-size: 13px; color: #f3dcae; }
+.eza-box input { width: auto; flex: 1; }
+#eza-add { margin-top: 10px; }
