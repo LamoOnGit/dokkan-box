@@ -214,3 +214,15 @@ input[type=range] { padding: 0; border: 0; background: transparent; accent-color
 .friends .nm { font-weight: 600; font-size: 14px; line-height: 1.25; }
 .friends .sub { font-size: 12px; color: var(--muted); }
 .friends .sub.ok { color: var(--good); } .friends .sub.warn { color: var(--orange-hi); }
+.link-plan { margin-top: 14px; }
+.link-plan summary { list-style: none; cursor: pointer; display: grid; gap: 2px; }
+.link-plan summary::-webkit-details-marker { display: none; }
+.link-plan summary .group-h::after { content: ' ▾'; color: var(--orange-hi); }
+.link-plan[open] summary .group-h::after { content: ' ▴'; }
+.link-plan ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.link-plan li { background: var(--panel2); border-radius: var(--r-md); padding: 10px 12px; cursor: pointer; }
+.link-plan li .nm { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.lp-links { display: grid; gap: 6px; }
+.lp { display: grid; font-size: 13px; }
+.lp b { font-weight: 600; color: var(--orange-hi); }
+.lp small { color: var(--muted); font-size: 12px; }

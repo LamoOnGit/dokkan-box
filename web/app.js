@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import { setLinkEffects, linkTotals } from './engine.js';
+import { setLinkEffects, linkTotals, linkValue } from './engine.js';
 
 const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
@@ -378,8 +378,38 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
     ${t.rotations.map((r, k) => { const names = shared(units[r[0]], units[r[1]]);
       return group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]], '', linksDetail(names)); }).join('')}
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
+    ${linkPlanHtml(t)}
     ${tipsHtml(t)}
   </article>`;
+}
+
+// Liens à monter : pour chaque carte, ses liens les plus utiles DANS cette team
+// (partagés avec son partenaire de rotation = priorité, puis avec le plus de coéquipiers)
+function linkPlan(t) {
+  const units = t.units;
+  const partner = new Map();
+  t.rotations.forEach(([a, b]) => { partner.set(a, b); partner.set(b, a); });
+  const fx = state.meta.linkEffects || {};
+  return units.map((u, i) => {
+    if (u.role === 'ami') return null;
+    const c = state.byId.get(u.id);
+    const mates = units.map((v, j) => ({ v, j })).filter(({ v, j }) => j !== i && v.role !== 'ami');
+    const scored = c.links.map((l) => {
+      const p = partner.has(i) && units[partner.get(i)].role !== 'ami' && state.byId.get(units[partner.get(i)].id).links.includes(l);
+      const n = mates.filter(({ v }) => state.byId.get(v.id).links.includes(l)).length;
+      return { l, p, n, score: linkValue(l) * ((p ? 2 : 0) + n), fx: fx[l] || '' };
+    }).filter((x) => x.n > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+    return { c, scored };
+  }).filter((x) => x && x.scored.length);
+}
+
+function linkPlanHtml(t) {
+  const plan = linkPlan(t);
+  if (!plan.length) return '';
+  return `<details class="link-plan"><summary><span class="group-h">Liens à monter en priorité</span>
+    <span class="group-sub">Pour chaque carte, les liens qui servent le plus dans cette team. Monte-les en jouant la team.</span></summary>
+    <ul>${plan.map(({ c, scored }) => `<li data-id="${esc(c.id)}"><div class="nm">${esc(c.name)}</div>
+      <div class="lp-links">${scored.map((x) => `<span class="lp" title="${esc(x.fx)}"><b>${esc(x.l)}</b><small>${x.p ? 'avec son partenaire de rotation' : ''}${x.p && x.n > 1 ? ' · ' : ''}${x.n > 1 || !x.p ? `${x.n} coéquipier${x.n > 1 ? 's' : ''}` : ''} · ${esc(x.fx)}</small></span>`).join('')}</div></li>`).join('')}</ul></details>`;
 }
 
 function tipsHtml(t) {
@@ -491,7 +521,7 @@ $('#run-watch').onclick = async () => {
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 
