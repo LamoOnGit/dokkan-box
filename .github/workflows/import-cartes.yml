@@ -1,0 +1,28 @@
+name: Import des cartes
+
+on:
+  workflow_dispatch:        # bouton "Run workflow" dans l'onglet Actions
+  schedule:
+    - cron: '0 5 * * 1'     # tous les lundis à 6 h (heure de Paris en hiver)
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Importer toutes les cartes Global
+        run: node import/from-dokkandb.mjs
+      - name: Enregistrer les cartes
+        run: |
+          git config user.name "dokkan-bot"
+          git config user.email "dokkan-bot@users.noreply.github.com"
+          git add web/data/cards.json
+          git diff --cached --quiet || git commit -m "Mise à jour des cartes"
+          git push

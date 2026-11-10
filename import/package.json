@@ -1,0 +1,10 @@
+{
+  "name": "dokkan-import",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "import": "node import-cards.mjs",
+    "test": "node test/run.mjs"
+  }
+}
