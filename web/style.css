@@ -200,3 +200,7 @@ input[type=range] { padding: 0; border: 0; background: transparent; accent-color
 .links-detail summary { cursor: pointer; color: var(--muted); }
 .links-detail summary b { color: var(--good); font-weight: 600; }
 .links-detail ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.mini .inv { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.tips { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.tips li { display: flex; justify-content: space-between; gap: 10px; align-items: center; background: var(--panel2); border-radius: var(--r-md); padding: 9px 12px; font-size: 13px; cursor: pointer; }
+.tips li > b { color: var(--good); white-space: nowrap; }

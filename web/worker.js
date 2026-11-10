@@ -1,4 +1,4 @@
-import { optimize, watchlist, setLinkEffects } from './engine.js';
+import { optimize, watchlist, setLinkEffects, investTips } from './engine.js';
 
 self.onmessage = (e) => {
   const { id, kind, cards, box, options, links } = e.data;
@@ -35,7 +35,8 @@ function slimTeam(t) {
     leader: t.leader.id,
     friend: t.friend ? t.friend.id : t.leader.id,
     boostedCount: t.boostedCount,
+    tips: investTips(t),
     rotations: t.rotations,
-    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, eff: u.eff, linkBonus: u.linkBonus })),
+    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
   };
 }

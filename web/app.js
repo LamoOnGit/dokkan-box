@@ -333,7 +333,8 @@ function mini(u, highlight) {
   else if (u.role === 'ami') role = '<div class="role lead">Ami</div>';
   else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>`;
   else role = '<div class="role off">Hors leader</div>';
-  return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${role}</div>`;
+  const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
+  return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
 }
 
 function shared(a, b) {
@@ -373,7 +374,20 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
     ${t.rotations.map((r, k) => { const names = shared(units[r[0]], units[r[1]]);
       return group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]], '', linksDetail(names)); }).join('')}
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
+    ${tipsHtml(t)}
   </article>`;
+}
+
+function tipsHtml(t) {
+  if (!t.tips || !t.tips.length) return '';
+  const label = (tip) => {
+    const c = state.byId.get(tip.id);
+    if (tip.kind === 'dupe') return `1 doublon de plus sur <b>${esc(c.name)}</b> (×${tip.from.count || 1} → ×${tip.to.count})`;
+    if (tip.kind === 'sa') return `Attaque spéciale de <b>${esc(c.name)}</b> au max (${tip.from.saLv || 1} → ${tip.to.saLv})`;
+    return `Liens de <b>${esc(c.name)}</b> au niveau 10 (${tip.from.linkLv || 1} → 10)`;
+  };
+  return `<div class="group"><div class="group-h">Où investir dans cette team</div>
+    <ul class="tips">${t.tips.map((tip) => `<li data-id="${esc(tip.id)}"><span>${label(tip)}</span><b>+${tip.pct.toFixed(1)} %</b></li>`).join('')}</ul></div>`;
 }
 
 function bonusTxt(t) {
@@ -464,7 +478,7 @@ $('#run-watch').onclick = async () => {
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 

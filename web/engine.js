@@ -308,3 +308,24 @@ export function watchlist(cards, box, topTeams, { onProgress } = {}) {
 
   return { upgrades, leaders: newLeaders.slice(0, 15) };
 }
+
+// Où investir : gain de puissance de la team si on monte une carte d'un cran
+export function investTips(team, limit = 3) {
+  const base = team.score;
+  const tips = [];
+  team.units.forEach((u, i) => {
+    if (u.role === 'ami') return;
+    const own = u.own || DEFAULT_OWN;
+    const saMax = u.card.saMax || 10;
+    const tries = [];
+    if ((own.count || 1) < 5) tries.push({ kind: 'dupe', own: { ...own, count: (own.count || 1) + 1 } });
+    if ((own.saLv || 1) < saMax) tries.push({ kind: 'sa', own: { ...own, saLv: saMax } });
+    if ((own.linkLv || 1) < 10) tries.push({ kind: 'links', own: { ...own, linkLv: 10 } });
+    for (const t of tries) {
+      const next = team.units.map((x, j) => (j === i ? { ...x, own: t.own, pw: power(x.card, t.own), lf: linkFactor(t.own) } : x));
+      const pct = (scoreTeam(next).score - base) / base * 100;
+      if (pct > 0.05) tips.push({ id: u.card.id, kind: t.kind, pct, from: own, to: t.own });
+    }
+  });
+  return tips.sort((a, b) => b.pct - a.pct).slice(0, limit);
+}
