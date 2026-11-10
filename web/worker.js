@@ -1,7 +1,8 @@
-import { optimize, watchlist } from './engine.js';
+import { optimize, watchlist, setLinkEffects } from './engine.js';
 
 self.onmessage = (e) => {
-  const { id, kind, cards, box, options } = e.data;
+  const { id, kind, cards, box, options, links } = e.data;
+  if (links) setLinkEffects(links);
   const progress = (p) => self.postMessage({ id, progress: p });
   try {
     if (kind === 'optimize') {

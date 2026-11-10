@@ -70,6 +70,7 @@ await writeFile(OUT, JSON.stringify({
   sourceGeneratedAt: src.generated,
   server: 'global',
   count: cards.length,
+  linkEffects: src.links || {},
   cards,
 }));
 const noLs = cards.filter((c) => !c.leader.length).length;

@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { setLinkEffects, linkTotals } from './engine.js';
 
 const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
@@ -23,6 +24,7 @@ async function loadCards() {
   const res = await fetch('data/cards.json', { cache: 'no-cache' });
   const data = await res.json();
   state.meta = data;
+  setLinkEffects(data.linkEffects || {});
   state.cards = data.cards.sort((a, b) => (a.rarity === b.rarity ? 0 : a.rarity === 'LR' ? -1 : 1) || a.name.localeCompare(b.name));
   state.cards.forEach((c) => { c._search = `${c.name} ${c.title} ${c.categories.join(' ')}`.toLowerCase(); state.byId.set(c.id, c); });
   const cats = new Set();
@@ -319,7 +321,7 @@ function run(kind, options, onProgress) {
   const id = ++reqId;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
-    worker.postMessage({ id, kind, cards: state.cards, box: state.box, options });
+    worker.postMessage({ id, kind, cards: state.cards, box: state.box, options, links: state.meta.linkEffects || {} });
   });
 }
 function bar(el, p) { el.hidden = false; el.firstElementChild.style.width = `${Math.round(p * 100)}%`; }
@@ -352,12 +354,13 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
   const why = [];
   why.push({ ok: boosted === members.length, txt: boosted === members.length ? `Les ${members.length} cartes sont boostées par le leader` : `${boosted} cartes sur ${members.length} boostées par le leader` });
   t.rotations.forEach((r, k) => {
-    const n = shared(units[r[0]], units[r[1]]).length;
-    why.push({ ok: n >= 3, txt: `Rotation ${k + 1} : ${n} lien${n > 1 ? 's' : ''} en commun` });
+    const names = shared(units[r[0]], units[r[1]]);
+    const n = names.length; const tot = linkTotals(names);
+    why.push({ ok: tot.atk + tot.ki * 8 >= 50, txt: `Rotation ${k + 1} : ${n} lien${n > 1 ? 's' : ''} en commun${n ? ` (${bonusTxt(tot)})` : ''}` });
   });
 
-  const group = (title, sub, list, hint) => `<div class="group"><div class="group-h">${title}${hint ? `<small>${hint}</small>` : ''}</div>
-    <p class="group-sub">${sub}</p><div class="slot-row">${list.map((u) => mini(u, highlight)).join('')}</div></div>`;
+  const group = (title, sub, list, hint, extra = '') => `<div class="group"><div class="group-h">${title}${hint ? `<small>${hint}</small>` : ''}</div>
+    <p class="group-sub">${sub}</p><div class="slot-row">${list.map((u) => mini(u, highlight)).join('')}</div>${extra}</div>`;
 
   return `<article class="team${i === 0 && !highlight ? ' best' : ''}">
     <div class="team-head">${art(L)}
@@ -367,9 +370,25 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null } = {}) {
     ${friendLine(t, L)}
     ${best && rel !== 100 ? `<p class="muted small-text" style="margin:0">${rel} % de ta meilleure team</p>` : ''}
     <ul class="why">${why.map((w) => `<li class="${w.ok ? '' : 'warn'}">${esc(w.txt)}</li>`).join('')}</ul>
-    ${t.rotations.map((r, k) => group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]])).join('')}
+    ${t.rotations.map((r, k) => { const names = shared(units[r[0]], units[r[1]]);
+      return group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]], '', linksDetail(names)); }).join('')}
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
   </article>`;
+}
+
+function bonusTxt(t) {
+  const p = [];
+  if (t.ki) p.push(`Ki +${t.ki}`);
+  if (t.atk) p.push(`ATK +${t.atk} %`);
+  if (t.def) p.push(`DEF +${t.def} %`);
+  return p.join(', ') || 'bonus mineurs';
+}
+
+function linksDetail(names) {
+  if (!names.length) return '<p class="links-detail muted">Aucun lien en commun.</p>';
+  const fx = state.meta.linkEffects || {};
+  return `<details class="links-detail"><summary>Bonus des liens : <b>${esc(bonusTxt(linkTotals(names)))}</b> pour chacune</summary>
+    <ul>${names.map((n) => `<li><b>${esc(n)}</b> <span class="muted">${esc(fx[n] || '')}</span></li>`).join('')}</ul></details>`;
 }
 
 function friendLine(t, L) {

@@ -54,11 +54,61 @@ export function leaderMax(card) {
   return Math.max(0, ...(card.leader || []).map((c) => c.pct));
 }
 
+// ---- Effets des liens (niveau 10) ----
+// Chaque lien est converti en Ki / ATK % / DEF %, puis en une valeur unique.
+let LINKS = {};           // nom -> { text, ki, atk, def, cond, value }
+const AVG_LINK = 20;      // valeur d'un lien « moyen » (ex. ATK +20 %)
+
+export function parseLink(text) {
+  const t = String(text || '');
+  const r = { text: t, ki: 0, atk: 0, def: 0, enemyDef: 0, crit: 0, evade: 0, cond: 1 };
+  let m;
+  if ((m = /Ki \+(\d+)/.exec(t))) r.ki = Number(m[1]);
+  for (m of t.matchAll(/(?<!enemies' )(?<!enemy's )(ATK & DEF|ATK|DEF) \+(\d+)%/g)) {
+    const v = Number(m[2]);
+    if (m[1] !== 'DEF') r.atk += v;
+    if (m[1] !== 'ATK') r.def += v;
+  }
+  if ((m = /enem(?:y's|ies') DEF -(\d+)%/.exec(t))) r.enemyDef = Number(m[1]);
+  if ((m = /critical hit \+(\d+)%/.exec(t))) r.crit = Number(m[1]);
+  if ((m = /evading[^+]*\+(\d+)%/.exec(t))) r.evade = Number(m[1]);
+  if (/when performing a Super Attack/i.test(t)) r.cond = 0.8;
+  else if (/\b(when|if|while|after|against|facing|per )\b/i.test(t)) r.cond = 0.5;
+  if (/Recovers/i.test(t)) r.def += 5;
+  r.value = (r.ki * 8 + r.atk + r.enemyDef * 0.5 + r.crit * 1.5 + (r.def + r.evade * 2) * 0.5) * r.cond;
+  return r;
+}
+
+export function setLinkEffects(map) {
+  LINKS = {};
+  for (const [name, text] of Object.entries(map || {})) LINKS[name] = parseLink(text);
+}
+
+export function linkValue(name) {
+  return LINKS[name] ? LINKS[name].value / AVG_LINK : 1; // lien inconnu = lien moyen
+}
+
+export function sharedLinkNames(a, b) {
+  if (a === b) return a.links.slice();
+  return a.links.filter((l) => b.links.includes(l));
+}
+
+// Liens partagés pondérés par leur effet réel (1 = un lien moyen)
 export function sharedLinks(a, b) {
-  if (a === b) return a.links.length;
-  let n = 0;
-  for (const l of a.links) if (b.links.includes(l)) n++;
-  return n;
+  let v = 0;
+  for (const l of sharedLinkNames(a, b)) v += linkValue(l);
+  return v;
+}
+
+// Total des bonus des liens partagés (affichage)
+export function linkTotals(names) {
+  const t = { ki: 0, atk: 0, def: 0, cond: 0 };
+  for (const n of names) {
+    const l = LINKS[n]; if (!l) continue;
+    t.ki += l.ki; t.atk += l.atk; t.def += l.def;
+    if (l.cond < 1) t.cond++;
+  }
+  return t;
 }
 
 // Meilleures 2 rotations (2 paires disjointes) parmi les membres
