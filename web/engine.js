@@ -201,7 +201,7 @@ export function recommendFriends(team, allLeaders, n = 3) {
 }
 
 // pool : [{card, own}] ; leader : {card, own}
-export function bestTeamForLeader(leader, pool, { candidates = 12 } = {}) {
+export function bestTeamForLeader(leader, pool, { candidates = 12, force = null } = {}) {
   const L = leader.card;
   const mk = (card, own, role) => {
     const r = boostReason(L, card);
@@ -221,16 +221,23 @@ export function bestTeamForLeader(leader, pool, { candidates = 12 } = {}) {
     const prev = byName.get(p.card.name);
     if (!prev || prev.pre < u.pre) byName.set(p.card.name, u);
   }
+  // Carte imposée (onglet Actu / fiche carte) : elle est toujours dans la team
+  let forced = null;
+  if (force && force !== L.id) {
+    const fp = pool.find((p) => p.card.id === force);
+    if (fp && fp.card.name !== L.name) { forced = mk(fp.card, fp.own, 'membre'); byName.delete(fp.card.name); }
+  }
   const ranked = [...byName.values()].sort((a, b) => b.pre - a.pre);
   const boosted = ranked.filter((u) => u.boost > 0);
+  const size = forced ? TEAM_SIZE - 1 : TEAM_SIZE;
   let cand = boosted.slice(0, candidates);
-  if (cand.length < TEAM_SIZE) cand = cand.concat(ranked.filter((u) => u.boost === 0).slice(0, TEAM_SIZE - cand.length));
-  if (!cand.length) return null;
-  const k = Math.min(TEAM_SIZE, cand.length);
+  if (cand.length < size) cand = cand.concat(ranked.filter((u) => u.boost === 0).slice(0, size - cand.length));
+  if (!cand.length && !forced) return null;
+  const k = Math.min(size, cand.length);
 
   let best = null;
   for (const combo of combinations(cand, k)) {
-    const res = scoreTeam([leadU, friendU, ...combo]);
+    const res = scoreTeam([leadU, friendU, ...(forced ? [forced] : []), ...combo]);
     if (!best || res.score > best.score) best = res;
   }
   best.leader = L;
@@ -268,6 +275,36 @@ export function optimize(cards, box, { focusCategory = null, focusClass = null, 
   const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
   for (const t of top) t.friends = recommendFriends(t, allLeaders);
   return top;
+}
+
+// Dans quelles teams jouer une carte (possédée ou non) : meilleures teams qui l'incluent
+export function teamsWithCard(cards, box, cardId, { limit = 3 } = {}) {
+  const card = cards.find((c) => c.id === cardId);
+  if (!card) return { teams: [], best: 0, owned: false };
+  const owned = Boolean(box[cardId]?.count > 0);
+  const base = ownedPool(cards, box);
+  const pool = owned ? base : base.concat([{ card, own: FRESH_OWN }]);
+  const without = base.filter((p) => p.card.id !== cardId);
+  const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
+  const leaders = pool.filter((p) => leaderMax(p.card) > 0 && (p.card.id === cardId || leaderBoost(p.card, card) > 0));
+  const out = [];
+  for (const l of leaders) {
+    const t = bestTeamForLeader(l, pool, { force: cardId });
+    if (!t || !t.units.some((u) => u.card.id === cardId)) continue;
+    let gain = null;
+    if (l.card.id !== cardId) {
+      const ref = bestTeamForLeader(l, without);
+      if (ref) gain = (t.score - ref.score) / ref.score * 100;
+    }
+    t.gain = gain;
+    out.push(t);
+  }
+  out.sort((a, b) => b.score - a.score);
+  const seen = new Set();
+  const top = out.filter((t) => (seen.has(t.leader.name) ? false : seen.add(t.leader.name))).slice(0, limit);
+  for (const t of top) t.friends = recommendFriends(t, allLeaders);
+  const bestNow = optimize(cards, box, { limit: 1 })[0];
+  return { teams: top, best: bestNow ? bestNow.score : 0, owned };
 }
 
 // À surveiller : cartes manquantes qui améliorent le plus tes équipes, et leaders à aller chercher

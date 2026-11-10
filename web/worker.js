@@ -1,4 +1,4 @@
-import { optimize, watchlist, setLinkEffects, investTips } from './engine.js';
+import { optimize, watchlist, setLinkEffects, investTips, teamsWithCard } from './engine.js';
 
 self.onmessage = (e) => {
   const { id, kind, cards, box, options, links } = e.data;
@@ -8,6 +8,9 @@ self.onmessage = (e) => {
     if (kind === 'optimize') {
       const teams = optimize(cards, box, { ...options, onProgress: progress });
       self.postMessage({ id, result: teams.map(slimTeam) });
+    } else if (kind === 'fit') {
+      const r = teamsWithCard(cards, box, options.cardId);
+      self.postMessage({ id, result: { best: r.best, owned: r.owned, teams: r.teams.map((t) => ({ ...slimTeam(t), gain: t.gain })) } });
     } else if (kind === 'watch') {
       const top = optimize(cards, box, { limit: 5 });
       const w = watchlist(cards, box, top, { onProgress: progress });

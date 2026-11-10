@@ -1,0 +1,6 @@
+{
+  "_aide": "Annonces ajoutées à la main (EZA annoncées que la base ne connaît pas encore). date au format AAAA-MM-JJ, ou null si inconnue.",
+  "upcomingEza": [
+    { "id": "1027600", "kind": "EZA", "date": null, "note": "Annoncée" }
+  ]
+}

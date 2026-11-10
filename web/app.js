@@ -34,6 +34,7 @@ async function loadCards() {
   state.categories = [...cats].sort((a, b) => a.localeCompare(b));
   $('#demo-banner').hidden = !data.demo;
   try { const r = await fetch('data/extra.json', { cache: 'no-cache' }); state.extra = r.ok ? await r.json() : null; } catch { state.extra = null; }
+  try { const r = await fetch('data/manual.json', { cache: 'no-cache' }); state.manual = r.ok ? await r.json() : {}; } catch { state.manual = {}; }
   const date = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('fr-FR') : '?';
   $('#credits').innerHTML = `${state.cards.length} cartes LR et UR Global, mises à jour le ${date}. Source : ${esc(data.source || 'wiki Dokkan')}.`;
 }
@@ -355,11 +356,13 @@ function openCard(id) {
       <div><span class="pill t-${c.type}">${typeName(c)}</span><span class="pill dark">${esc(c.rarity)}</span>
       <h2>${esc(c.name)}</h2><div class="muted small-text">${esc(c.title)}</div></div></div>
     <div id="own">${ownHtml()}</div>
+    <div id="fit" class="fit"><button class="block" id="fit-run" type="button">Dans quelles teams la jouer ?</button></div>
     <h3>Si elle est leader</h3><div class="small-text">${esc(c.leaderSkill || 'Pas de leader skill.').replace(/\n/g, '<br>')}</div>
     <h3>Ses liens</h3><div>${c.links.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('') || '<span class="muted small-text">Non renseignés</span>'}</div>
     <h3>Ses catégories</h3><div>${c.categories.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('')}</div>
     <div class="ext"><a href="${dokkanEssentials}" target="_blank" rel="noopener">Analyse DokkanEssentials ↗</a><a href="${wiki}" target="_blank" rel="noopener">Page du wiki ↗</a></div>`);
 
+  $('#fit-run').onclick = () => runFit(id);
   const bind = () => {
     const own = $('#own');
     own.innerHTML = ownHtml();
@@ -452,7 +455,7 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
   const isSaved = state.saved.some((x) => teamKey(x) === key);
   const saveBtn = savedIdx !== null
     ? `<button class="danger block" data-unsave="${savedIdx}" type="button">Supprimer cette team</button>`
-    : saveIdx !== null ? `<button class="${isSaved ? 'ghost' : ''} block" data-save="${saveIdx}" type="button"${isSaved ? ' disabled' : ''}>${isSaved ? 'Team enregistrée' : 'Enregistrer cette team'}</button>` : '';
+    : saveIdx !== null ? `<button class="${isSaved ? 'ghost' : ''} block" data-save="${String(saveIdx).includes(':') ? saveIdx : 'opt:' + saveIdx}" type="button"${isSaved ? ' disabled' : ''}>${isSaved ? 'Team enregistrée' : 'Enregistrer cette team'}</button>` : '';
   return `<article class="team${i === 0 && !highlight && savedIdx === null ? ' best' : ''}">
     <div class="team-head">${art(L)}
       <div><div class="team-tag">${tag || (i === 0 ? 'Ta meilleure team' : `Team n° ${i + 1}`)}</div>
@@ -632,7 +635,8 @@ $('#run-watch').onclick = async () => {
 document.addEventListener('click', (e) => {
   const sv = e.target.closest('[data-save]');
   if (sv) {
-    const t = state.lastTeams[Number(sv.dataset.save)]; if (!t) return;
+    const [src, n] = sv.dataset.save.split(':');
+    const t = (src === 'fit' ? state.fitTeams : state.lastTeams)[Number(n)]; if (!t) return;
     state.saved.unshift({ ...t, label: teamLabel(t), savedAt: new Date().toISOString() });
     saveBox(); renderSaved();
     sv.textContent = 'Team enregistrée'; sv.disabled = true; sv.classList.add('ghost');
@@ -650,6 +654,33 @@ document.addEventListener('click', (e) => {
   if (el) openCard(el.dataset.id);
 });
 
+/* ---------- Dans quelles teams jouer une carte ---------- */
+async function runFit(id) {
+  const box = $('#fit'); const c = state.byId.get(id);
+  box.innerHTML = '<div class="progress"><span style="width:60%"></span></div><p class="muted small-text">Je cherche les meilleures teams avec cette carte…</p>';
+  try {
+    const r = await run('fit', { cardId: id });
+    state.fitTeams = r.teams;
+    if (!r.teams.length) {
+      box.innerHTML = `<div class="empty"><b>Aucune team possible pour l'instant</b>Aucun leader de ta box ne booste cette carte. Regarde son leader skill et ses catégories : un leader de l'une d'elles lui ouvrirait une team.</div>`;
+      return;
+    }
+    const intro = r.owned ? 'Les meilleures teams de ta box qui l\'incluent.' : 'Si tu l\'invoquais, voici les meilleures teams qu\'elle formerait avec tes cartes.';
+    box.innerHTML = `<h3>Dans quelles teams la jouer</h3><p class="muted small-text" style="margin:0 0 6px">${intro}</p>
+      ${r.teams.map((t, i) => {
+        const L = state.byId.get(t.leader);
+        const rel = r.best ? Math.round(t.score / r.best * 100) : 100;
+        const gain = t.gain == null ? (t.leader === id ? 'Elle est le leader' : '') : t.gain > 0.05 ? `+${t.gain.toFixed(1)} % pour cette team` : 'N\'améliore pas cette team';
+        return `<details class="lead-pick fit-pick"><summary class="item">${art(L)}
+          <div><div class="nm">Team ${esc(L.name)}</div><div class="sub">${esc(gain)}</div><div class="sub more-lbl">Voir la team</div></div>
+          <div class="gain" style="color:var(--text)">${Math.round(t.score)}<small>${rel} % de ta meilleure</small></div></summary>
+          ${teamHtml(t, i, { highlight: r.owned ? null : id, saveIdx: 'fit:' + i, tag: `Team avec ${c.name}` })}</details>`;
+      }).join('')}`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty"><b>Le calcul a échoué</b>${esc(e.message)}</div>`;
+  }
+}
+
 /* ---------- Onglet Actu ---------- */
 const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '');
 function chip(id, note = '') {
@@ -665,6 +696,13 @@ function renderNews() {
   const today = new Date().toISOString().slice(0, 10);
   const soon = state.cards.filter((c) => c.globalDate > today).sort((a, b) => a.globalDate.localeCompare(b.globalDate));
   const ezaSoon = state.cards.filter((c) => c.ezaDate && c.ezaDate > today);
+  const manualNotes = {};
+  for (const m of state.manual?.upcomingEza || []) {
+    const c = state.byId.get(m.id);
+    if (!c || (c.ezaDate && (!m.date || c.ezaDate >= m.date))) continue; // déjà dans la base : on ne double pas
+    if (!ezaSoon.includes(c)) ezaSoon.unshift(c);
+    manualNotes[c.id] = `${m.kind || 'EZA'} ${m.date ? 'le ' + frDate(m.date) : (m.note || 'annoncée').toLowerCase()}`;
+  }
   const since = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
   const ezaRecent = state.cards.filter((c) => c.ezaDate && c.ezaDate <= today && c.ezaDate >= since).sort((a, b) => b.ezaDate.localeCompare(a.ezaDate));
   const sec = (title, sub, body) => `<section class="news-sec"><h2 class="sec-h">${title}</h2>${sub ? `<p class="sec-p">${sub}</p>` : ''}${body}</section>`;
@@ -674,7 +712,7 @@ function renderNews() {
     soon.length ? row(soon.map((c) => c.id), Object.fromEntries(soon.map((c) => [c.id, `Sort le ${frDate(c.globalDate)}`])))
       : '<p class="empty">Aucune nouvelle carte annoncée pour le moment.</p>');
   html += sec('EZA à venir et récentes', 'Les cartes qui viennent de recevoir (ou vont recevoir) un Extreme Z-Awakening. Si tu les as, pense à les réveiller.',
-    (ezaSoon.length || ezaRecent.length) ? row([...ezaSoon, ...ezaRecent].map((c) => c.id), Object.fromEntries([...ezaSoon, ...ezaRecent].map((c) => [c.id, `${c.ezaKind || 'EZA'} ${c.ezaDate > today ? 'le' : 'depuis le'} ${frDate(c.ezaDate)}`])))
+    (ezaSoon.length || ezaRecent.length) ? row([...ezaSoon, ...ezaRecent].map((c) => c.id), Object.fromEntries([...ezaSoon, ...ezaRecent].map((c) => [c.id, manualNotes[c.id] || `${c.ezaKind || 'EZA'} ${c.ezaDate > today ? 'le' : 'depuis le'} ${frDate(c.ezaDate)}`])))
       : '<p class="empty">Aucune EZA récente.</p>');
   const banners = (x.summons || []).filter((b) => !b.end || b.end >= new Date().toISOString());
   html += sec('Bannières en cours', state.gains ? 'Le % indique ce que la carte apporterait à tes teams.' : 'Lance « À invoquer » pour voir ce que chaque carte apporterait à tes teams.',
