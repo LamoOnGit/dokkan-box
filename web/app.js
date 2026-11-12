@@ -444,6 +444,15 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
     ? `Les ${members.length} cartes sont boostées par ton leader${vias.length === 1 ? ` (toutes dans « ${vias[0]} »)` : ''}`
     : `${boosted} cartes sur ${members.length} boostées par ton leader` });
 
+  // Affinités : nombre moyen de liens partagés avec le reste de l'équipe (hors ami)
+  const team = units.filter((u) => u.role !== 'ami');
+  const avgLinks = (u) => {
+    const others = team.filter((v) => v !== u);
+    return others.length ? others.reduce((sum, v) => sum + shared(u, v).length, 0) / others.length : 0;
+  };
+  const weak = team.filter((u) => u.role === 'membre' && avgLinks(u) < 2);
+  if (weak.length) why.push({ ok: false, txt: `Peu de liens avec l'équipe : ${weak.map((u) => state.byId.get(u.id).name).join(', ')}` });
+  else why.push({ ok: true, txt: `Toutes les cartes partagent des liens entre elles (${(team.reduce((sum, u) => sum + avgLinks(u), 0) / team.length).toFixed(1)} en moyenne)` });
   t.rotations.forEach((r, k) => {
     const names = shared(units[r[0]], units[r[1]]);
     const n = names.length; const tot = linkTotals(names);

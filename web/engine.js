@@ -150,23 +150,30 @@ function bestRotations(units) {
   return { ...best, matrix: m };
 }
 
+// Poids des liens : 1 lien « moyen » partagé (ex. ATK +20 %) ≈ +8 % d'efficacité
+export const LINK_WEIGHT = 0.08;
+
 export function scoreTeam(units) {
   // units : [{card, own, pw, boost, lf, role}]
   const rot = bestRotations(units);
   const inRot = new Map();
   rot.pairs.forEach(([x, y]) => { inRot.set(x, y); inRot.set(y, x); });
+  const n = units.length;
+  const avgWith = (i) => {
+    let s = 0; let k = 0;
+    for (let j = 0; j < n; j++) if (j !== i) { s += rot.matrix[i][j]; k++; }
+    return k ? s / k : 0;
+  };
   let total = 0;
   const detail = units.map((u, i) => {
-    let lb;
-    if (inRot.has(i)) {
-      lb = rot.matrix[i][inRot.get(i)];
-    } else {
-      const others = [...inRot.keys()];
-      lb = others.length ? others.reduce((s, k) => s + rot.matrix[i][k], 0) / others.length * 0.5 : 0;
-    }
-    const eff = u.pw * (1 + u.boost / 100) * (1 + 0.03 * lb);
+    // Affinité : liens partagés (pondérés par leur effet et leur niveau) avec ses voisins réels
+    // En rotation : surtout avec son partenaire, un peu avec le flottant qui le rejoint.
+    // Flottant : il tourne, donc la moyenne avec toute l'équipe.
+    const affinity = avgWith(i);
+    const lb = inRot.has(i) ? 0.75 * rot.matrix[i][inRot.get(i)] + 0.25 * affinity : affinity;
+    const eff = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * lb);
     total += eff;
-    return { ...u, eff, linkBonus: lb };
+    return { ...u, eff, linkBonus: lb, affinity };
   });
   const types = new Set(units.map((u) => u.card.type));
   total *= 1 + 0.01 * (types.size - 1); // petit bonus de couverture de types
@@ -226,6 +233,14 @@ export function bestTeamForLeader(leader, pool, { candidates = 12, force = null 
   if (force && force !== L.id) {
     const fp = pool.find((p) => p.card.id === force);
     if (fp && fp.card.name !== L.name) { forced = mk(fp.card, fp.own, 'membre'); byName.delete(fp.card.name); }
+  }
+  // Pré-sélection : on tient compte des affinités de liens avec les autres cartes boostées,
+  // pour ne pas garder une carte forte qui ne partage ses liens avec presque personne
+  const pre0 = [...byName.values()].filter((u) => u.boost > 0).sort((a, b) => b.pre - a.pre).slice(0, 30);
+  for (const u of byName.values()) {
+    const others = pre0.filter((v) => v !== u).map((v) => sharedLinks(u.card, v.card)).sort((a, b) => b - a).slice(0, 4);
+    const aff = others.length ? others.reduce((s, x) => s + x, 0) / others.length : 0;
+    u.pre = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * (0.5 * aff + 0.5 * sharedLinks(L, u.card) * 0.5));
   }
   const ranked = [...byName.values()].sort((a, b) => b.pre - a.pre);
   const boosted = ranked.filter((u) => u.boost > 0);
