@@ -314,24 +314,24 @@ export function bestTeamForLeader(leader, pool, { candidates = 12, force = null 
     const fp = pool.find((p) => p.card.id === force);
     if (fp && fp.card.name !== L.name) { forced = mk(fp.card, fp.own, 'membre'); byName.delete(fp.card.name); }
   }
-  // Pré-sélection : on tient compte des affinités de liens avec les autres cartes boostées,
-  // pour ne pas garder une carte forte qui ne partage ses liens avec presque personne
-  const pre0 = [...byName.values()].filter((u) => u.boost > 0).sort((a, b) => b.pre - a.pre).slice(0, 30);
+  // Pré-sélection en deux temps :
+  // 1) on garde les cartes qui RENTRENT dans la team : boostées par le leader ET bien liées au reste des cartes boostées
+  //    (affinité calculée sur les liens seulement, sans regarder la force, pour ne pas favoriser les cartes méta isolées)
+  // 2) parmi elles, on prend les plus fortes (stats + passif + tier list)
+  const pool0 = [...byName.values()].filter((u) => u.boost > 0);
   for (const u of byName.values()) {
-    const others = pre0.filter((v) => v !== u).map((v) => sharedLinks(u.card, v.card)).sort((a, b) => b - a).slice(0, 4);
-    const aff = others.length ? others.reduce((s, x) => s + x, 0) / others.length : 0;
-    u.aff = aff;
-    u.pre = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * (0.5 * aff + 0.5 * sharedLinks(L, u.card) * 0.5))
-      * (aff >= ISO_MIN ? 1 : 0.6 + 0.4 * (aff / ISO_MIN));
+    const others = pool0.filter((v) => v !== u).map((v) => sharedLinks(u.card, v.card)).sort((a, b) => b - a).slice(0, 4);
+    u.aff = others.length ? others.reduce((s, x) => s + x, 0) / others.length : 0;
+    u.lead = sharedLinks(L, u.card);
+    u.pre = u.pw * (1 + u.boost / 100);
   }
-  const ranked = [...byName.values()].sort((a, b) => b.pre - a.pre);
-  const boosted = ranked.filter((u) => u.boost > 0);
   const size = forced ? TEAM_SIZE - 1 : TEAM_SIZE;
-  // Candidats : les plus forts, plus quelques cartes très bien liées qu'on ne veut pas rater
-  let cand = boosted.slice(0, candidates - 3);
-  const linked = boosted.filter((u) => !cand.includes(u)).sort((a, b) => b.aff * b.pre - a.aff * a.pre).slice(0, 3);
-  cand = cand.concat(linked);
-  if (cand.length < size) cand = cand.concat(ranked.filter((u) => u.boost === 0).slice(0, size - cand.length));
+  const byPower = (a, b) => b.pre - a.pre;
+  const fits = pool0.filter((u) => u.aff >= ISO_MIN).sort(byPower);
+  const loose = pool0.filter((u) => u.aff < ISO_MIN).sort((a, b) => b.aff * b.pre - a.aff * a.pre);
+  let cand = fits.slice(0, candidates);
+  if (cand.length < size + 2) cand = cand.concat(loose.slice(0, size + 2 - cand.length));
+  if (cand.length < size) cand = cand.concat([...byName.values()].filter((u) => u.boost === 0).sort(byPower).slice(0, size - cand.length));
   if (!cand.length && !forced) return null;
   const k = Math.min(size, cand.length);
 
