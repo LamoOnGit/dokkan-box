@@ -224,6 +224,8 @@ function bestRotations(units) {
 
 // Poids des liens : 1 lien « moyen » partagé (ex. ATK +20 %) ≈ +8 % d'efficacité
 export const LINK_WEIGHT = 0.08;
+// En dessous de cette affinité (≈ 2 liens moyens partagés en moyenne avec chaque coéquipier), la carte est jugée isolée
+const ISO_MIN = 1.6;
 
 export function scoreTeam(units) {
   // units : [{card, own, pw, boost, lf, role}]
@@ -246,7 +248,10 @@ export function scoreTeam(units) {
     const lb = inRot.has(i) ? 0.75 * rot.matrix[i][inRot.get(i)] + 0.25 * affinity : affinity;
     // Soutien des coéquipiers (passifs qui boostent les alliés), plafonné
     const sup = Math.min(0.4, 0.002 * (supportTotal - (u.card.pfx?.support || 0)));
-    const eff = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * lb) * (1 + Math.max(0, sup));
+    // Carte isolée (presque aucun lien partagé avec l'équipe) : en jeu elle tape bien moins fort
+    // et casse les liens de ses voisins → forte pénalité, pour qu'une carte bien liée passe devant
+    const iso = u.role === 'ami' ? 1 : affinity >= ISO_MIN ? 1 : 0.6 + 0.4 * (affinity / ISO_MIN);
+    const eff = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * lb) * (1 + Math.max(0, sup)) * iso;
     total += eff;
     return { ...u, eff, linkBonus: lb, affinity };
   });
@@ -315,12 +320,17 @@ export function bestTeamForLeader(leader, pool, { candidates = 12, force = null 
   for (const u of byName.values()) {
     const others = pre0.filter((v) => v !== u).map((v) => sharedLinks(u.card, v.card)).sort((a, b) => b - a).slice(0, 4);
     const aff = others.length ? others.reduce((s, x) => s + x, 0) / others.length : 0;
-    u.pre = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * (0.5 * aff + 0.5 * sharedLinks(L, u.card) * 0.5));
+    u.aff = aff;
+    u.pre = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * (0.5 * aff + 0.5 * sharedLinks(L, u.card) * 0.5))
+      * (aff >= ISO_MIN ? 1 : 0.6 + 0.4 * (aff / ISO_MIN));
   }
   const ranked = [...byName.values()].sort((a, b) => b.pre - a.pre);
   const boosted = ranked.filter((u) => u.boost > 0);
   const size = forced ? TEAM_SIZE - 1 : TEAM_SIZE;
-  let cand = boosted.slice(0, candidates);
+  // Candidats : les plus forts, plus quelques cartes très bien liées qu'on ne veut pas rater
+  let cand = boosted.slice(0, candidates - 3);
+  const linked = boosted.filter((u) => !cand.includes(u)).sort((a, b) => b.aff * b.pre - a.aff * a.pre).slice(0, 3);
+  cand = cand.concat(linked);
   if (cand.length < size) cand = cand.concat(ranked.filter((u) => u.boost === 0).slice(0, size - cand.length));
   if (!cand.length && !forced) return null;
   const k = Math.min(size, cand.length);
