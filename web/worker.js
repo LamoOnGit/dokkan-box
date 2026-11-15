@@ -1,8 +1,9 @@
-import { optimize, watchlist, setLinkEffects, investTips, teamsWithCard } from './engine.js';
+import { optimize, watchlist, setLinkEffects, setMeta, investTips, teamsWithCard } from './engine.js';
 
 self.onmessage = (e) => {
   const { id, kind, cards, box, options, links } = e.data;
   if (links) setLinkEffects(links);
+  if (e.data.tiers) setMeta(e.data.tiers);
   const progress = (p) => self.postMessage({ id, progress: p });
   try {
     if (kind === 'optimize') {

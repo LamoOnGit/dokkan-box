@@ -20,6 +20,42 @@ function stat(s, pf) {
   return lo + (hi - lo) * pf;
 }
 
+// ---- Force méta ----
+// Les stats seules ne disent pas tout : le passif fait l'essentiel de la force d'une carte.
+// On l'estime avec la tier list du moment (si la carte y est) et, sinon, avec sa date de sortie / d'EZA
+// (les cartes récentes ont des passifs bien plus forts).
+const TIER_FACTOR = { 'S++': 1.9, 'S+': 1.8, 'S': 1.7, 'S-': 1.6, 'A+': 1.5, 'A': 1.43, 'A-': 1.37, 'B+': 1.31, 'B': 1.26, 'B-': 1.22 };
+let TIERS = {};           // id -> tier
+let TODAY = Date.now();
+
+export function setMeta(tierlist) {
+  TIERS = {};
+  for (const t of tierlist || []) for (const id of t.cards || []) if (!TIERS[id]) TIERS[id] = t.tier;
+}
+
+export function tierOf(card) { return TIERS[card.id] || null; }
+
+export function metaFactor(card) {
+  // Date de « fraîcheur » : sortie Global, ou EZA (une EZA remet la carte à niveau, avec une petite décote)
+  const rel = card.globalDate ? Date.parse(card.globalDate) : 0;
+  const eza = card.ezaDate ? Date.parse(card.ezaDate) - 270 * 864e5 : 0;
+  const fresh = Math.max(rel, eza);
+  const years = fresh ? Math.max(0, (TODAY - fresh) / (365 * 864e5)) : 8;
+  const recency = Math.max(1, 1.3 - 0.07 * years); // carte de l'année ≈ ×1,3 ; 4-5 ans et plus ≈ ×1,0
+  const tier = TIER_FACTOR[TIERS[card.id]] || 0;
+  return Math.max(recency, tier);
+}
+
+// Stats pures (affichage)
+export function statPower(card, own = DEFAULT_OWN) {
+  const dupes = Math.max(0, (own.count || 1) - 1);
+  const pf = POTENTIAL[Math.min(dupes, 4)];
+  const st = card.stats || {};
+  let p = stat(st.atk, pf) * 1.0 + stat(st.def, pf) * 0.7 + stat(st.hp, pf) * 0.25;
+  if (!p) p = card.rarity === 'LR' ? 30000 : 24000;
+  return p;
+}
+
 export function power(card, own = DEFAULT_OWN) {
   const dupes = Math.max(0, (own.count || 1) - 1);
   const pf = POTENTIAL[Math.min(dupes, 4)];
@@ -29,6 +65,7 @@ export function power(card, own = DEFAULT_OWN) {
   const saMax = card.saMax || 10;
   const sa = Math.min(own.saLv || 1, saMax);
   p *= 1 + 0.15 * (saMax > 1 ? (sa - 1) / (saMax - 1) : 0);
+  p *= metaFactor(card);
   return p / 1000;
 }
 

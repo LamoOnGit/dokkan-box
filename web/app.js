@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import { setLinkEffects, linkTotals, linkValue } from './engine.js';
+import { setLinkEffects, linkTotals, linkValue, setMeta, tierOf, metaFactor, statPower } from './engine.js';
 
 const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
@@ -34,6 +34,7 @@ async function loadCards() {
   state.categories = [...cats].sort((a, b) => a.localeCompare(b));
   $('#demo-banner').hidden = !data.demo;
   try { const r = await fetch('data/extra.json', { cache: 'no-cache' }); state.extra = r.ok ? await r.json() : null; } catch { state.extra = null; }
+  setMeta(state.extra?.tierlist || []);
   try { const r = await fetch('data/manual.json', { cache: 'no-cache' }); state.manual = r.ok ? await r.json() : {}; } catch { state.manual = {}; }
   const date = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('fr-FR') : '?';
   $('#credits').innerHTML = `${state.cards.length} cartes LR et UR Global, mises à jour le ${date}. Source : ${esc(data.source || 'wiki Dokkan')}.`;
@@ -358,6 +359,7 @@ function openCard(id) {
     <div id="own">${ownHtml()}</div>
     <div id="fit" class="fit"><button class="block" id="fit-run" type="button">Dans quelles teams la jouer ?</button></div>
     <div id="eza-mark"></div>
+    ${forceHtml(c)}
     <h3>Si elle est leader</h3><div class="small-text">${esc(c.leaderSkill || 'Pas de leader skill.').replace(/\n/g, '<br>')}</div>
     <h3>Ses liens</h3><div>${c.links.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('') || '<span class="muted small-text">Non renseignés</span>'}</div>
     <h3>Ses catégories</h3><div>${c.categories.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('')}</div>
@@ -389,7 +391,8 @@ $('#help').onclick = () => openSheet(`<div class="help"><h2 style="font-family:'
   <dt>Rotation</dt><dd>Deux cartes qui reviennent ensemble sur le terrain un tour sur deux. On y met les cartes qui partagent le plus de liens.</dd>
   <dt>Flottants</dt><dd>Les 3 autres cartes : elles prennent la 3e place à tour de rôle.</dd>
   <dt>Doublons</dt><dd>Les exemplaires en plus d'une même carte. Ils débloquent son potentiel caché, donc plus de stats.</dd>
-  <dt>Puissance</dt><dd>Le score de l'optimiseur : stats boostées par le leader, plus les liens partagés. Il compare tes teams entre elles, il ne simule pas un combat.</dd>
+  <dt>Puissance</dt><dd>Le score de l'optimiseur : stats de chaque carte (ATK, DEF, PV, potentiel, attaque spéciale) × bonus méta × boost du leader × liens partagés. Il compare tes teams entre elles, il ne simule pas un combat.</dd>
+  <dt>Bonus méta</dt><dd>Les stats ne voient pas le passif. Une carte classée dans la tier list du moment reçoit jusqu'à ×1,9 (S++). Les autres reçoivent un bonus selon leur date de sortie ou d'EZA : jusqu'à ×1,3 pour une carte récente.</dd>
   </dl></div>`);
 
 /* ---------- Calculs (web worker) ---------- */
@@ -407,7 +410,7 @@ function run(kind, options, onProgress) {
   const id = ++reqId;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
-    worker.postMessage({ id, kind, cards: state.cards, box: state.box, options, links: state.meta.linkEffects || {} });
+    worker.postMessage({ id, kind, cards: state.cards, box: state.box, options, links: state.meta.linkEffects || {}, tiers: state.extra?.tierlist || [] });
   });
 }
 function bar(el, p) { el.hidden = false; el.firstElementChild.style.width = `${Math.round(p * 100)}%`; }
@@ -420,7 +423,8 @@ function mini(u, highlight) {
   else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
   else role = '<div class="role off">Hors leader</div>';
   const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
-  return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
+  const tb = tierOf(c) ? `<span class="tier-mini">${esc(tierOf(c))}</span>` : '';
+  return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}${tb}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
 }
 
 function shared(a, b) {
@@ -664,6 +668,21 @@ document.addEventListener('click', (e) => {
   const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
+
+/* ---------- Force d'une carte ---------- */
+function forceHtml(c) {
+  const st = c.stats || {};
+  const fmt = (n) => (n ? Math.round(n).toLocaleString('fr-FR') : '—');
+  const tier = tierOf(c);
+  const mf = metaFactor(c);
+  const fresh = c.ezaDate && c.ezaDate > (c.globalDate || '') ? `${c.ezaKind || 'EZA'} du ${new Date(c.ezaDate).toLocaleDateString('fr-FR')}` : `sortie le ${c.globalDate ? new Date(c.globalDate).toLocaleDateString('fr-FR') : '?'}`;
+  return `<h3>Sa force</h3>
+    <div class="force">
+      <div class="stats3"><div><small>ATK</small><b>${fmt(st.atk?.released)}</b></div><div><small>DEF</small><b>${fmt(st.def?.released)}</b></div><div><small>PV</small><b>${fmt(st.hp?.released)}</b></div></div>
+      <p>${tier ? `<span class="tier-pill">${esc(tier)}</span> Classée <b>${esc(tier)}</b> dans la tier list du moment.` : `Pas dans la tier list du moment (${esc(fresh)}).`}
+      Bonus méta ×${mf.toFixed(2)} sur ses stats, pour tenir compte de son passif.</p>
+    </div>`;
+}
 
 /* ---------- EZA annoncée (ajoutée à la main) ---------- */
 function ezaAnnounced(id) {
