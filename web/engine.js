@@ -4,8 +4,12 @@
 
 export const TEAM_SIZE = 5; // + leader + ami = 7
 
-// Part du potentiel débloqué selon le nombre de doublons (0 à 4+)
+// Part du potentiel débloqué selon le nombre de doublons (0 à 4+), si le joueur n'a pas indiqué son potentiel
 const POTENTIAL = [0.4, 0.6, 0.75, 0.9, 1.0];
+export function potentialOf(own = DEFAULT_OWN) {
+  if (own.pot != null && own.pot !== '') return Math.max(0, Math.min(100, Number(own.pot))) / 100;
+  return POTENTIAL[Math.min(Math.max(0, (own.count || 1) - 1), 4)];
+}
 
 export const DEFAULT_OWN = { count: 1, linkLv: 1, saLv: 1 };
 // Hypothèse pour une carte qu'on n'a pas encore (À surveiller) : fraîchement tirée
@@ -35,21 +39,24 @@ export function setMeta(tierlist) {
 
 export function tierOf(card) { return TIERS[card.id] || null; }
 
+// Effet du passif sur l'attaque et sur la défense (racine carrée pour ne pas écraser leader et liens)
+export function passiveMult(card) {
+  const f = card.pfx;
+  if (!f) return { off: 1.5, def: 1.5 };
+  const off = (1 + f.atk / 100) * (1 + 0.6 * f.addSA) * (1 + 0.5 * f.crit / 100) * (1 + 0.03 * f.ki);
+  const def = (1 + f.def / 100) / (1 - 0.8 * f.dr / 100) * (1 + 0.8 * f.evade / 100) * (1 + 0.4 * f.guard);
+  return { off: Math.sqrt(off), def: Math.sqrt(def) };
+}
+
+// Bonus méta : la tier list affine ce que la lecture du passif ne voit pas (actives, transformations…)
 export function metaFactor(card) {
-  // Date de « fraîcheur » : sortie Global, ou EZA (une EZA remet la carte à niveau, avec une petite décote)
-  const rel = card.globalDate ? Date.parse(card.globalDate) : 0;
-  const eza = card.ezaDate ? Date.parse(card.ezaDate) - 270 * 864e5 : 0;
-  const fresh = Math.max(rel, eza);
-  const years = fresh ? Math.max(0, (TODAY - fresh) / (365 * 864e5)) : 8;
-  const recency = Math.max(1, 1.3 - 0.07 * years); // carte de l'année ≈ ×1,3 ; 4-5 ans et plus ≈ ×1,0
-  const tier = TIER_FACTOR[TIERS[card.id]] || 0;
-  return Math.max(recency, tier);
+  const tier = TIER_FACTOR[TIERS[card.id]];
+  return tier ? 1 + 0.4 * (tier - 1) : 1;
 }
 
 // Stats pures (affichage)
 export function statPower(card, own = DEFAULT_OWN) {
-  const dupes = Math.max(0, (own.count || 1) - 1);
-  const pf = POTENTIAL[Math.min(dupes, 4)];
+  const pf = potentialOf(own);
   const st = card.stats || {};
   let p = stat(st.atk, pf) * 1.0 + stat(st.def, pf) * 0.7 + stat(st.hp, pf) * 0.25;
   if (!p) p = card.rarity === 'LR' ? 30000 : 24000;
@@ -57,16 +64,33 @@ export function statPower(card, own = DEFAULT_OWN) {
 }
 
 export function power(card, own = DEFAULT_OWN) {
-  const dupes = Math.max(0, (own.count || 1) - 1);
-  const pf = POTENTIAL[Math.min(dupes, 4)];
+  const pf = potentialOf(own);
   const st = card.stats || {};
-  let p = stat(st.atk, pf) * 1.0 + stat(st.def, pf) * 0.7 + stat(st.hp, pf) * 0.25;
-  if (!p) p = card.rarity === 'LR' ? 30000 : 24000; // stats absentes : valeur par défaut
+  const pm = passiveMult(card);
+  let p = stat(st.atk, pf) * pm.off + stat(st.def, pf) * 0.7 * pm.def + stat(st.hp, pf) * 0.25;
+  if (!p) p = (card.rarity === 'LR' ? 30000 : 24000) * 1.5; // stats absentes : valeur par défaut
   const saMax = card.saMax || 10;
   const sa = Math.min(own.saLv || 1, saMax);
   p *= 1 + 0.15 * (saMax > 1 ? (sa - 1) / (saMax - 1) : 0);
   p *= metaFactor(card);
   return p / 1000;
+}
+
+// Niveau d'un lien précis (réglé lien par lien, sinon le niveau moyen de la carte)
+export function linkLevel(own, name) {
+  const v = own?.links?.[name];
+  return Math.min(10, Math.max(1, v != null ? v : (own?.linkLv || 1)));
+}
+const lvFactor = (lv) => 0.6 + 0.04 * lv;
+
+// Valeur des liens partagés par deux cartes, selon le niveau de chaque lien chez chacune
+export function pairLinkValue(a, b) {
+  let v = 0;
+  for (const l of a.card.links) {
+    if (!b.card.links.includes(l)) continue;
+    v += linkValue(l) * (lvFactor(linkLevel(a.own, l)) + lvFactor(linkLevel(b.own, l))) / 2;
+  }
+  return v;
 }
 
 export function linkFactor(own = DEFAULT_OWN) {
@@ -170,7 +194,7 @@ function bestRotations(units) {
   for (let i = 0; i < n; i++) {
     m[i] = [];
     for (let j = 0; j < n; j++) {
-      m[i][j] = i === j ? 0 : sharedLinks(units[i].card, units[j].card) * (units[i].lf + units[j].lf) / 2;
+      m[i][j] = i === j ? 0 : pairLinkValue(units[i], units[j]);
     }
   }
   let best = { v: -1, pairs: [] };
@@ -202,13 +226,16 @@ export function scoreTeam(units) {
     return k ? s / k : 0;
   };
   let total = 0;
+  const supportTotal = units.filter((u) => u.role !== 'ami').reduce((s, u) => s + (u.card.pfx?.support || 0), 0);
   const detail = units.map((u, i) => {
     // Affinité : liens partagés (pondérés par leur effet et leur niveau) avec ses voisins réels
     // En rotation : surtout avec son partenaire, un peu avec le flottant qui le rejoint.
     // Flottant : il tourne, donc la moyenne avec toute l'équipe.
     const affinity = avgWith(i);
     const lb = inRot.has(i) ? 0.75 * rot.matrix[i][inRot.get(i)] + 0.25 * affinity : affinity;
-    const eff = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * lb);
+    // Soutien des coéquipiers (passifs qui boostent les alliés), plafonné
+    const sup = Math.min(0.4, 0.002 * (supportTotal - (u.card.pfx?.support || 0)));
+    const eff = u.pw * (1 + u.boost / 100) * (1 + LINK_WEIGHT * lb) * (1 + Math.max(0, sup));
     total += eff;
     return { ...u, eff, linkBonus: lb, affinity };
   });
@@ -423,9 +450,10 @@ export function investTips(team, limit = 3) {
     const own = u.own || DEFAULT_OWN;
     const saMax = u.card.saMax || 10;
     const tries = [];
-    if ((own.count || 1) < 5) tries.push({ kind: 'dupe', own: { ...own, count: (own.count || 1) + 1 } });
+    if ((own.count || 1) < 5 && (own.pot == null || own.pot === '')) tries.push({ kind: 'dupe', own: { ...own, count: (own.count || 1) + 1 } });
+    if (own.pot != null && own.pot !== '' && Number(own.pot) < 100) tries.push({ kind: 'pot', own: { ...own, pot: 100 } });
     if ((own.saLv || 1) < saMax) tries.push({ kind: 'sa', own: { ...own, saLv: saMax } });
-    if ((own.linkLv || 1) < 10) tries.push({ kind: 'links', own: { ...own, linkLv: 10 } });
+    if (u.card.links.some((l) => linkLevel(own, l) < 10)) tries.push({ kind: 'links', own: { ...own, linkLv: 10, links: {} } });
     for (const t of tries) {
       const next = team.units.map((x, j) => (j === i ? { ...x, own: t.own, pw: power(x.card, t.own), lf: linkFactor(t.own) } : x));
       const pct = (scoreTeam(next).score - base) / base * 100;

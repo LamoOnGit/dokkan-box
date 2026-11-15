@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import { setLinkEffects, linkTotals, linkValue, setMeta, tierOf, metaFactor, statPower } from './engine.js';
+import { setLinkEffects, linkTotals, linkValue, setMeta, tierOf } from './engine.js';
 
 const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
@@ -335,19 +335,27 @@ function openCard(id) {
   const dokkanEssentials = `https://www.google.com/search?q=${encodeURIComponent(`site:dokkanessentials.com ${c.title} ${c.name}`)}`;
   const wiki = `https://dbz-dokkanbattle.fandom.com/wiki/${encodeURIComponent(c.page.replace(/ /g, '_'))}`;
 
+  const POT = [['', 'Selon mes doublons'], [0, '0 % (rien débloqué)'], [55, '55 %'], [69, '69 %'], [79, '79 %'], [90, '90 %'], [100, '100 % (complet)']];
+  const fx = state.meta.linkEffects || {};
   const ownHtml = () => {
     const own = state.box[id];
     if (!own) return `<button class="block" id="c-add" type="button">Ajouter à ma box</button>`;
     const dupes = Math.max(0, own.count - 1);
+    const lv = (l) => own.links?.[l] ?? own.linkLv ?? 1;
     return `<div class="own-box">
       <div class="ctrl"><div class="ctrl-top"><span>Exemplaires</span>
         <div class="stepper"><button class="ghost" data-step="-1" type="button" aria-label="Retirer un exemplaire">−</button><span class="v">${own.count}</span><button data-step="1" type="button" aria-label="Ajouter un exemplaire">+</button></div></div>
-        <p>${dupes ? `${dupes} doublon${dupes > 1 ? 's' : ''}` : 'Aucun doublon'} : potentiel débloquable ${POTENTIAL[Math.min(dupes, 4)]}</p></div>
-      <div class="ctrl"><div class="ctrl-top"><span>Niveau des liens</span><span class="v" id="v-link">${own.linkLv}/10</span></div>
-        <input type="range" min="1" max="10" value="${own.linkLv}" id="r-link" aria-label="Niveau des liens">
-        <p>Le niveau moyen de ses liens. Monte-les en jouant la carte avec des partenaires.</p></div>
+        <p>${dupes ? `${dupes} doublon${dupes > 1 ? 's' : ''}` : 'Aucun doublon'}.</p></div>
+      <div class="ctrl"><div class="ctrl-top"><label for="s-pot">Potentiel caché débloqué</label>
+        <select id="s-pot" class="pot-select">${POT.map(([v, t]) => `<option value="${v}"${String(own.pot ?? '') === String(v) ? ' selected' : ''}>${t}</option>`).join('')}</select></div>
+        <p>${own.pot == null || own.pot === '' ? `Estimé à ${POTENTIAL[Math.min(dupes, 4)]} avec ${dupes} doublon${dupes > 1 ? 's' : ''}. Indique ton vrai pourcentage pour plus de précision.` : 'Le pourcentage affiché en jeu sur l\'écran du potentiel caché.'}</p></div>
       <div class="ctrl"><div class="ctrl-top"><span>Attaque spéciale</span><span class="v" id="v-sa">${Math.min(own.saLv, saMax)}/${saMax}</span></div>
         <input type="range" min="1" max="${saMax}" value="${Math.min(own.saLv, saMax)}" id="r-sa" aria-label="Niveau d'attaque spéciale"></div>
+      <div class="ctrl"><div class="ctrl-top"><span>Niveau des liens</span>
+        <span class="row"><button class="ghost small" data-all="1" type="button">Tous à 1</button><button class="ghost small" data-all="10" type="button">Tous à 10</button></span></div>
+        <ul class="link-lv">${c.links.map((l) => `<li><div><b>${esc(l)}</b><small>${esc(fx[l] || '')}</small></div>
+          <div class="stepper"><button class="ghost" data-lk="${esc(l)}" data-d="-1" type="button" aria-label="Baisser ${esc(l)}">−</button><span class="v">${lv(l)}</span><button data-lk="${esc(l)}" data-d="1" type="button" aria-label="Monter ${esc(l)}">+</button></div></li>`).join('')}</ul>
+        <p>Les niveaux de liens se voient en jeu sur la fiche du perso. Ils comptent dans le calcul des rotations.</p></div>
     </div>
     <button class="danger block" id="c-remove" type="button">Retirer de ma box</button>`;
   };
@@ -361,7 +369,7 @@ function openCard(id) {
     <div id="eza-mark"></div>
     ${forceHtml(c)}
     <h3>Si elle est leader</h3><div class="small-text">${esc(c.leaderSkill || 'Pas de leader skill.').replace(/\n/g, '<br>')}</div>
-    <h3>Ses liens</h3><div>${c.links.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('') || '<span class="muted small-text">Non renseignés</span>'}</div>
+    <div id="links-ro"></div>
     <h3>Ses catégories</h3><div>${c.categories.map((l) => `<span class="pill dark">${esc(l)}</span>`).join('')}</div>
     <div class="ext"><a href="${dokkanEssentials}" target="_blank" rel="noopener">Analyse DokkanEssentials ↗</a><a href="${wiki}" target="_blank" rel="noopener">Page du wiki ↗</a></div>`);
 
@@ -378,7 +386,14 @@ function openCard(id) {
     $('#c-add')?.addEventListener('click', () => { state.box[id] = { count: 1, linkLv: 1, saLv: 1 }; saveBox(); refreshTile(id); updateCounts(); toast('Ajoutée à ta box'); bind(); });
     $('#c-remove')?.addEventListener('click', () => { delete state.box[id]; saveBox(); refreshTile(id); updateCounts(); toast('Retirée de ta box'); bind(); });
     own.querySelectorAll('[data-step]').forEach((b) => b.onclick = () => { upd({ count: Math.min(99, state.box[id].count + Number(b.dataset.step)) }); bind(); });
-    $('#r-link')?.addEventListener('input', (e) => { $('#v-link').textContent = `${e.target.value}/10`; upd({ linkLv: Number(e.target.value) }); });
+    $('#s-pot')?.addEventListener('change', (e) => { upd({ pot: e.target.value === '' ? null : Number(e.target.value) }); bind(); });
+    own.querySelectorAll('[data-lk]').forEach((b) => b.onclick = () => {
+      const o = state.box[id]; const l = b.dataset.lk;
+      const cur = o.links?.[l] ?? o.linkLv ?? 1;
+      upd({ links: { ...(o.links || {}), [l]: Math.min(10, Math.max(1, cur + Number(b.dataset.d))) } }); bind();
+    });
+    own.querySelectorAll('[data-all]').forEach((b) => b.onclick = () => { upd({ linkLv: Number(b.dataset.all), links: {} }); bind(); });
+    $('#links-ro').innerHTML = state.box[id] ? '' : `<h3>Ses liens</h3><ul class="link-lv ro">${c.links.map((l) => `<li><div><b>${esc(l)}</b><small>${esc(fx[l] || '')}</small></div></li>`).join('') || '<li class="muted">Non renseignés</li>'}</ul>`;
     $('#r-sa')?.addEventListener('input', (e) => { $('#v-sa').textContent = `${e.target.value}/${saMax}`; upd({ saLv: Number(e.target.value) }); });
   };
   bind();
@@ -391,8 +406,9 @@ $('#help').onclick = () => openSheet(`<div class="help"><h2 style="font-family:'
   <dt>Rotation</dt><dd>Deux cartes qui reviennent ensemble sur le terrain un tour sur deux. On y met les cartes qui partagent le plus de liens.</dd>
   <dt>Flottants</dt><dd>Les 3 autres cartes : elles prennent la 3e place à tour de rôle.</dd>
   <dt>Doublons</dt><dd>Les exemplaires en plus d'une même carte. Ils débloquent son potentiel caché, donc plus de stats.</dd>
-  <dt>Puissance</dt><dd>Le score de l'optimiseur : stats de chaque carte (ATK, DEF, PV, potentiel, attaque spéciale) × bonus méta × boost du leader × liens partagés. Il compare tes teams entre elles, il ne simule pas un combat.</dd>
-  <dt>Bonus méta</dt><dd>Les stats ne voient pas le passif. Une carte classée dans la tier list du moment reçoit jusqu'à ×1,9 (S++). Les autres reçoivent un bonus selon leur date de sortie ou d'EZA : jusqu'à ×1,3 pour une carte récente.</dd>
+  <dt>Puissance</dt><dd>Le score de l'optimiseur : stats de chaque carte (ATK, DEF, PV, potentiel, attaque spéciale) × effet du passif × tier list × boost du leader × liens partagés. Il compare tes teams entre elles, il ne simule pas un combat.</dd>
+  <dt>Passif</dt><dd>L'outil lit le passif de chaque carte (version EZA si elle existe) : ATK et DEF en plus, réduction de dégâts, esquive, critiques, garde, attaques spéciales en plus, Ki, soutien aux alliés. Chaque effet est pondéré selon sa condition : un effet de base compte en entier, un effet « à partir du 5e tour » beaucoup moins.</dd>
+  <dt>Tier list</dt><dd>Les cartes classées dans la tier list du moment reçoivent un petit bonus en plus (jusqu'à ×1,36 pour une S++), pour ce que le passif ne dit pas : actives, transformations…</dd>
   </dl></div>`);
 
 /* ---------- Calculs (web worker) ---------- */
@@ -519,12 +535,14 @@ function linkPlan(t) {
   return units.map((u, i) => {
     if (u.role === 'ami') return null;
     const c = state.byId.get(u.id);
+    const own = state.box[u.id] || u.own || {};
     const mates = units.map((v, j) => ({ v, j })).filter(({ v, j }) => j !== i && v.role !== 'ami');
     const scored = c.links.map((l) => {
       const p = partner.has(i) && units[partner.get(i)].role !== 'ami' && state.byId.get(units[partner.get(i)].id).links.includes(l);
       const n = mates.filter(({ v }) => state.byId.get(v.id).links.includes(l)).length;
-      return { l, p, n, score: linkValue(l) * ((p ? 2 : 0) + n), fx: fx[l] || '' };
-    }).filter((x) => x.n > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+      const lv = own.links?.[l] ?? own.linkLv ?? 1;
+      return { l, p, n, lv, score: linkValue(l) * ((p ? 2 : 0) + n) * (10 - lv), fx: fx[l] || '' };
+    }).filter((x) => x.n > 0 && x.lv < 10).sort((a, b) => b.score - a.score).slice(0, 3);
     return { c, scored };
   }).filter((x) => x && x.scored.length);
 }
@@ -533,9 +551,9 @@ function linkPlanHtml(t) {
   const plan = linkPlan(t);
   if (!plan.length) return '';
   return `<details class="link-plan"><summary><span class="group-h">Liens à monter en priorité</span>
-    <span class="group-sub">Pour chaque carte, les liens qui servent le plus dans cette team. Monte-les en jouant la team.</span></summary>
+    <span class="group-sub">Pour chaque carte, les liens qui rapportent le plus dans cette team, selon leur niveau actuel. Les liens déjà au niveau 10 ne sont pas listés.</span></summary>
     <ul>${plan.map(({ c, scored }) => `<li data-id="${esc(c.id)}"><div class="nm">${esc(c.name)}</div>
-      <div class="lp-links">${scored.map((x) => `<span class="lp" title="${esc(x.fx)}"><b>${esc(x.l)}</b><small>${x.p ? 'avec son partenaire de rotation' : ''}${x.p && x.n > 1 ? ' · ' : ''}${x.n > 1 || !x.p ? `${x.n} coéquipier${x.n > 1 ? 's' : ''}` : ''} · ${esc(x.fx)}</small></span>`).join('')}</div></li>`).join('')}</ul></details>`;
+      <div class="lp-links">${scored.map((x) => `<span class="lp" title="${esc(x.fx)}"><b>${esc(x.l)} <span class="lv">niv. ${x.lv} → 10</span></b><small>${x.p ? 'avec son partenaire de rotation' : ''}${x.p && x.n > 1 ? ' · ' : ''}${x.n > 1 || !x.p ? `${x.n} coéquipier${x.n > 1 ? 's' : ''}` : ''} · ${esc(x.fx)}</small></span>`).join('')}</div></li>`).join('')}</ul></details>`;
 }
 
 function tipsHtml(t) {
@@ -544,7 +562,8 @@ function tipsHtml(t) {
     const c = state.byId.get(tip.id);
     if (tip.kind === 'dupe') return `1 doublon de plus sur <b>${esc(c.name)}</b> (×${tip.from.count || 1} → ×${tip.to.count})`;
     if (tip.kind === 'sa') return `Attaque spéciale de <b>${esc(c.name)}</b> au max (${tip.from.saLv || 1} → ${tip.to.saLv})`;
-    return `Liens de <b>${esc(c.name)}</b> au niveau 10 (${tip.from.linkLv || 1} → 10)`;
+    if (tip.kind === 'pot') return `Potentiel caché de <b>${esc(c.name)}</b> à 100 % (${tip.from.pot} % → 100 %)`;
+    return `Tous les liens de <b>${esc(c.name)}</b> au niveau 10`;
   };
   return `<div class="group"><div class="group-h">Où investir dans cette team</div>
     <ul class="tips">${t.tips.map((tip) => `<li data-id="${esc(tip.id)}"><span>${label(tip)}</span><b>+${tip.pct.toFixed(1)} %</b></li>`).join('')}</ul></div>`;
@@ -674,14 +693,24 @@ function forceHtml(c) {
   const st = c.stats || {};
   const fmt = (n) => (n ? Math.round(n).toLocaleString('fr-FR') : '—');
   const tier = tierOf(c);
-  const mf = metaFactor(c);
-  const fresh = c.ezaDate && c.ezaDate > (c.globalDate || '') ? `${c.ezaKind || 'EZA'} du ${new Date(c.ezaDate).toLocaleDateString('fr-FR')}` : `sortie le ${c.globalDate ? new Date(c.globalDate).toLocaleDateString('fr-FR') : '?'}`;
+  const f = c.pfx || {};
+  const chips = [];
+  if (f.atk) chips.push(`ATK +${Math.round(f.atk)} %`);
+  if (f.def) chips.push(`DEF +${Math.round(f.def)} %`);
+  if (f.dr) chips.push(`Réduction de dégâts ${Math.round(f.dr)} %`);
+  if (f.evade) chips.push(`Esquive ${Math.round(f.evade)} %`);
+  if (f.crit) chips.push(`Critiques ${Math.round(f.crit)} %`);
+  if (f.guard) chips.push('Garde');
+  if (f.addSA) chips.push(`+${f.addSA.toFixed(1)} attaque spéciale`);
+  if (f.ki) chips.push(`Ki +${Math.round(f.ki)}`);
+  if (f.support) chips.push(`Soutien aux alliés`);
   return `<h3>Sa force</h3>
     <div class="force">
       <div class="stats3"><div><small>ATK</small><b>${fmt(st.atk?.released)}</b></div><div><small>DEF</small><b>${fmt(st.def?.released)}</b></div><div><small>PV</small><b>${fmt(st.hp?.released)}</b></div></div>
-      <p>${tier ? `<span class="tier-pill">${esc(tier)}</span> Classée <b>${esc(tier)}</b> dans la tier list du moment.` : `Pas dans la tier list du moment (${esc(fresh)}).`}
-      Bonus méta ×${mf.toFixed(2)} sur ses stats, pour tenir compte de son passif.</p>
-    </div>`;
+      <p>${tier ? `<span class="tier-pill">${esc(tier)}</span> Classée <b>${esc(tier)}</b> dans la tier list du moment. ` : ''}Ce que l'outil retient de son passif${c.ezaKind ? ` (version ${esc(c.ezaKind)})` : ''}, en moyenne sur un combat :</p>
+      <div class="pfx">${chips.map((x) => `<span class="pill dark">${esc(x)}</span>`).join('') || '<span class="muted small-text">Aucun effet chiffrable trouvé.</span>'}</div>
+    </div>
+    ${c.passive ? `<details class="passive"><summary>Lire son passif${c.passiveName ? ` : ${esc(c.passiveName)}` : ''}</summary><div class="ptext">${esc(c.passive).replace(/\n/g, '<br>')}</div></details>` : ''}`;
 }
 
 /* ---------- EZA annoncée (ajoutée à la main) ---------- */

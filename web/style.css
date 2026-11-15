@@ -264,3 +264,18 @@ input[type=range] { padding: 0; border: 0; background: transparent; accent-color
 .tabs { grid-template-columns: repeat(5, 1fr); }
 .tabs button { font-size: 10.5px; padding-left: 2px; padding-right: 2px; }
 #tab-meta .slot-row { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.pot-select { width: auto; max-width: 55%; padding: 7px 10px; font-size: 13px; }
+.link-lv { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.link-lv li { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.link-lv li > div:first-child { min-width: 0; display: grid; }
+.link-lv b { font-size: 14px; font-weight: 600; }
+.link-lv small { font-size: 12px; color: var(--muted); }
+.link-lv .stepper { flex: none; }
+.link-lv .stepper button { width: 30px; height: 30px; font-size: 16px; }
+.link-lv.ro li { background: var(--panel2); border-radius: var(--r-md); padding: 8px 12px; }
+.pfx { margin-top: 6px; }
+details.passive { margin-top: 10px; font-size: 13px; }
+details.passive summary { cursor: pointer; color: var(--orange-hi); font-weight: 600; }
+.ptext { margin-top: 8px; color: var(--muted); line-height: 1.5; background: var(--panel2); border-radius: var(--r-md); padding: 10px 12px; }
+.lp .lv { color: var(--muted); font-weight: 400; font-size: 12px; }
+.ctrl-top .row .small { white-space: nowrap; }

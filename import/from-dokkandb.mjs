@@ -7,6 +7,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseLeaderSkill } from './parse-card.mjs';
+import { parsePassive, passiveText } from './parse-passive.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = 'https://raw.githubusercontent.com/waltz4replica/dokkandb/main/data/cards.json';
@@ -58,6 +59,9 @@ for (const c of src.cards) {
     global: true,
     globalDate: c.dates.glb,
     upcoming: c.dates.glb > today,
+    passiveName: decode(c.passive?.name || ''),
+    passive: passiveText(c.passive?.seza || c.passive?.eza || c.passive?.base || ''),
+    pfx: parsePassive(c.passive?.seza || c.passive?.eza || c.passive?.base || ''),
     eza: Boolean(c.eza || c.seza),
     ezaDate: c.dates?.glbSeza || c.dates?.glbEza || null,
     ezaKind: c.dates?.glbSeza ? 'SEZA' : c.dates?.glbEza ? 'EZA' : null,
