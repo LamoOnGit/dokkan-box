@@ -48,10 +48,21 @@ export function passiveMult(card) {
   return { off: Math.sqrt(off), def: Math.sqrt(def) };
 }
 
-// Bonus méta : la tier list affine ce que la lecture du passif ne voit pas (actives, transformations…)
+// Bonus méta : la tier list du moment donne un vrai bonus ; une carte hors tier list perd un peu
+// selon l'ancienneté de sa sortie ou de sa dernière EZA (les anciennes cartes non réveillées sont dépassées)
+export function freshYears(card) {
+  const rel = card.globalDate ? Date.parse(card.globalDate) : 0;
+  const eza = card.ezaDate ? Date.parse(card.ezaDate) : 0;
+  const fresh = Math.max(rel, eza);
+  return fresh ? Math.max(0, (TODAY - fresh) / (365 * 864e5)) : 8;
+}
+export function isMeta(card) {
+  return Boolean(TIERS[card.id]) || freshYears(card) <= 1;
+}
 export function metaFactor(card) {
   const tier = TIER_FACTOR[TIERS[card.id]];
-  return tier ? 1 + 0.4 * (tier - 1) : 1;
+  if (tier) return 1 + 0.6 * (tier - 1);
+  return Math.max(0.75, 1 - 0.05 * freshYears(card));
 }
 
 // Stats pures (affichage)
@@ -334,8 +345,9 @@ export function ownedPool(cards, box) {
 }
 
 // Optimiseur : meilleures équipes avec la box
-export function optimize(cards, box, { focusCategory = null, focusClass = null, limit = 10, onProgress } = {}) {
+export function optimize(cards, box, { focusCategory = null, focusClass = null, metaOnly = false, limit = 10, onProgress } = {}) {
   let pool = ownedPool(cards, box);
+  if (metaOnly) pool = pool.filter((p) => isMeta(p.card));
   if (focusClass) pool = pool.filter((p) => p.card.class === focusClass);
   let leaders = pool.filter((p) => leaderMax(p.card) > 0);
   if (focusCategory) leaders = leaders.filter((p) => p.card.leader.some((cl) => cl.cats.includes(focusCategory)));

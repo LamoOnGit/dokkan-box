@@ -70,6 +70,9 @@ export function parsePassive(html) {
       const line = decodeHtml(raw.replace(/<span class="ic up">▲<\/span>/g, '↑').replace(/<span class="ic down">▼<\/span>/g, '↓').replace(/<[^>]+>/g, ''))
         .replace(/^-\s*/, '');
       let w = w0 * (once ? 0.35 : 1);
+      // « Great chance of ATK & DEF 713% » : effet aléatoire, pondéré par sa probabilité
+      const ch = /^(rare|medium|great|high|huge|ultra-high) chance of (?:ATK|DEF)/i.exec(line);
+      if (ch) w *= CHANCE[ch[1].toLowerCase()] / 100;
       if (/for (\d+) turns?/i.test(line)) { const n = Number(/for (\d+) turns?/i.exec(line)[1]); if (n <= 1) w *= 0.5; else if (n <= 3) w *= 0.75; }
       const upTo = /\(up to ([\d.]+)%?\)/i.exec(line);
       const stackMul = (v) => (stacking ? (upTo ? Number(upTo[1]) : v * 3) : v);
@@ -85,7 +88,8 @@ export function parsePassive(html) {
       let m;
       for (m of line.matchAll(/\b(ATK & DEF|ATK|DEF)\s*(?:\+)?(\d+)%\s*(↑)?/g)) {
         if (/↓/.test(line.slice(m.index, m.index + m[0].length + 2))) continue;
-        const v = stackMul(Number(m[2])) * w;
+        // Une seule ligne ne compte pas plus de +300 % (les gros chiffres « gadget » type DEF 4410 % restent marginaux)
+        const v = Math.min(300, stackMul(Number(m[2]))) * w;
         if (m[1] !== 'DEF') fx.atk += v;
         if (m[1] !== 'ATK') fx.def += v;
       }
@@ -105,6 +109,7 @@ export function parsePassive(html) {
     }
   }
   for (const k of Object.keys(fx)) fx[k] = Math.round(fx[k] * 10) / 10;
+  fx.atk = Math.min(fx.atk, 1000); fx.def = Math.min(fx.def, 1000);
   fx.dr = Math.min(fx.dr, 80); fx.evade = Math.min(fx.evade, 80); fx.crit = Math.min(fx.crit, 100); fx.guard = Math.min(fx.guard, 1);
   return fx;
 }

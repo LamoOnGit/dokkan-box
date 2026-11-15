@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import { setLinkEffects, linkTotals, linkValue, setMeta, tierOf } from './engine.js';
+import { setLinkEffects, linkTotals, linkValue, setMeta, tierOf, isMeta } from './engine.js';
 
 const TYPES = ['AGL', 'TEQ', 'INT', 'STR', 'PHY'];
 const PAGE = 120;
@@ -439,7 +439,7 @@ function mini(u, highlight) {
   else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
   else role = '<div class="role off">Hors leader</div>';
   const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
-  const tb = tierOf(c) ? `<span class="tier-mini">${esc(tierOf(c))}</span>` : '';
+  const tb = tierOf(c) ? `<span class="tier-mini">${esc(tierOf(c))}</span>` : (u.role === 'membre' && !isMeta(c) ? '<span class="tier-mini off">hors méta</span>' : '');
   return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}${tb}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
 }
 
@@ -473,6 +473,8 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
   const weak = team.filter((u) => u.role === 'membre' && avgLinks(u) < 2);
   if (weak.length) why.push({ ok: false, txt: `Peu de liens avec l'équipe : ${weak.map((u) => state.byId.get(u.id).name).join(', ')}` });
   else why.push({ ok: true, txt: `Toutes les cartes partagent des liens entre elles (${(team.reduce((sum, u) => sum + avgLinks(u), 0) / team.length).toFixed(1)} en moyenne)` });
+  const offMeta = team.filter((u) => u.role === 'membre' && !isMeta(state.byId.get(u.id)));
+  if (offMeta.length) why.push({ ok: false, txt: `Hors méta : ${offMeta.map((u) => state.byId.get(u.id).name).join(', ')}. C'est ce que ta box a de mieux pour cette place ; « À invoquer » te dit par quoi la remplacer.` });
   t.rotations.forEach((r, k) => {
     const names = shared(units[r[0]], units[r[1]]);
     const n = names.length; const tot = linkTotals(names);
@@ -618,7 +620,7 @@ $('#run-opt').onclick = async () => {
   const btn = $('#run-opt'); btn.disabled = true; btn.textContent = 'Calcul en cours…';
   const prog = $('#opt-progress'); bar(prog, 0);
   try {
-    const teams = await run('optimize', { focusCategory: $('#o-cat').value || null, focusClass: $('#o-cls').value || null, limit: 10 }, (p) => bar(prog, p));
+    const teams = await run('optimize', { focusCategory: $('#o-cat').value || null, focusClass: $('#o-cls').value || null, metaOnly: $('#o-meta').value === '1', limit: 10 }, (p) => bar(prog, p));
     state.ranOptimizer = true; renderGuide();
     state.lastTeams = teams;
     const best = teams[0]?.score;

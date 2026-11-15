@@ -279,3 +279,4 @@ details.passive summary { cursor: pointer; color: var(--orange-hi); font-weight:
 .ptext { margin-top: 8px; color: var(--muted); line-height: 1.5; background: var(--panel2); border-radius: var(--r-md); padding: 10px 12px; }
 .lp .lv { color: var(--muted); font-weight: 400; font-size: 12px; }
 .ctrl-top .row .small { white-space: nowrap; }
+.tier-mini.off { background: var(--line); color: var(--muted); font-weight: 600; }
