@@ -665,7 +665,7 @@ document.addEventListener('click', (e) => {
   }
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #meta .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 
@@ -770,17 +770,40 @@ function renderNews() {
   html += sec('Bannières en cours', state.gains ? 'Le % indique ce que la carte apporterait à tes teams.' : 'Lance « À invoquer » pour voir ce que chaque carte apporterait à tes teams.',
     banners.length ? banners.map((b) => `<div class="banner-card"><div class="bn-h"><b>${esc(b.name)}</b><span>jusqu'au ${frDate(b.end)}</span></div>${row(b.cards)}</div>`).join('')
       : '<p class="empty">Pas d\'info sur les bannières pour le moment.</p>');
-  const tl = (x.tierlist || []).slice(0, 6);
-  if (tl.length) html += sec('Tier list du moment', 'Les cartes les mieux classées en ce moment (source : DokkanStats).',
-    tl.map((t) => `<div class="tier"><div class="tier-h"><span class="tier-badge">${esc(t.tier)}</span><span class="muted small-text">rangs ${esc(t.ranks)}</span></div>${row(t.cards)}</div>`).join(''));
   if ((x.news || []).length) html += sec('Nouvelles du jeu', '', `<ul class="news-list">${x.news.slice(0, 10).map((n) => `<li><a href="${esc(n.url)}" target="_blank" rel="noopener"><b>${esc(n.title)}</b><span>${frDate(n.date)}${n.tags?.length ? ' · ' + esc(n.tags.join(', ')) : ''}</span></a></li>`).join('')}</ul>`);
   $('#news').innerHTML = html;
 }
 
+/* ---------- Onglet Méta ---------- */
+let metaFilter = 'all';
+function renderMeta() {
+  const tl = state.extra?.tierlist || [];
+  if (!tl.length) { $('#meta').innerHTML = '<div class="empty"><b>Tier list indisponible</b>Elle revient à la prochaine mise à jour des données.</div>'; $('#meta-sum').textContent = ''; return; }
+  const have = (id) => state.box[id]?.count > 0;
+  const all = tl.flatMap((t) => t.cards);
+  const nHave = all.filter(have).length;
+  $('#meta-sum').textContent = `Tu en as ${nHave} sur ${all.length}.`;
+  const keep = (id) => metaFilter === 'all' || (metaFilter === 'have' ? have(id) : !have(id));
+  const blocks = tl.map((t) => {
+    const ids = t.cards.filter(keep);
+    if (!ids.length) return '';
+    return `<div class="tier"><div class="tier-h"><span class="tier-badge">${esc(t.tier)}</span><span class="muted small-text">rangs ${esc(t.ranks)} · ${t.cards.filter(have).length}/${t.cards.length} dans ta box</span></div>
+      <div class="slot-row">${ids.map((id) => chip(id)).join('')}</div></div>`;
+  }).join('');
+  $('#meta').innerHTML = blocks || `<div class="empty"><b>${metaFilter === 'have' ? 'Aucune carte de la tier list dans ta box' : 'Tu les as toutes'}</b></div>`;
+}
+$('#meta-seg').onclick = (e) => {
+  const b = e.target.closest('[data-m]'); if (!b) return;
+  metaFilter = b.dataset.m;
+  $('#meta-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  renderMeta();
+};
+
 /* ---------- Onglets ---------- */
 function switchTab(name) {
   document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
-  ['box', 'opt', 'watch', 'news'].forEach((t) => { $(`#tab-${t}`).hidden = t !== name; });
+  ['box', 'opt', 'watch', 'meta', 'news'].forEach((t) => { $(`#tab-${t}`).hidden = t !== name; });
+  if (name === 'meta') renderMeta();
   if (name === 'box') renderGrid();
   if (name === 'news') renderNews();
   window.scrollTo(0, 0);

@@ -97,6 +97,21 @@
       </div>
       <div id="watch-results"></div>
     </section>
+    <!-- Onglet Méta -->
+    <section id="tab-meta" class="tab" hidden>
+      <div class="intro">
+        <h2>Tier list du moment</h2>
+        <p class="muted">Les 90 cartes les plus fortes en ce moment, de S++ à B-. Mise à jour chaque matin (source : DokkanStats).</p>
+        <div class="seg seg-sm" id="meta-seg" role="group" aria-label="Filtre">
+          <button data-m="all" class="on" type="button">Toutes</button>
+          <button data-m="have" type="button">Que j'ai</button>
+          <button data-m="miss" type="button">Manquantes</button>
+        </div>
+        <p class="muted small-text" id="meta-sum" style="margin:6px 0 0"></p>
+      </div>
+      <div id="meta"></div>
+    </section>
+
     <!-- Onglet Actu -->
     <section id="tab-news" class="tab" hidden>
       <div id="news"></div>
@@ -107,6 +122,7 @@
     <button data-tab="box" class="active" type="button"><span class="ico">▦</span>Ma box</button>
     <button data-tab="opt" type="button"><span class="ico">⚡</span>Mes teams</button>
     <button data-tab="watch" type="button"><span class="ico">✦</span>À invoquer</button>
+    <button data-tab="meta" type="button"><span class="ico">▲</span>Méta</button>
     <button data-tab="news" type="button"><span class="ico">✷</span>Actu</button>
   </nav>
 
