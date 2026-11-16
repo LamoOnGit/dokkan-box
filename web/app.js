@@ -913,6 +913,7 @@ function renderBuilder() {
       <div class="label">Les 5 autres cartes <span class="muted small-text">(l'ami s'ajoute en jeu)</span></div>
       <div class="slot-row">${slots.join('')}</div>
       <p class="muted small-text" style="margin:4px 0 0">Touche une carte pour la changer ou la retirer.</p>
+      ${rotEditorHtml(t)}
       <div class="row" style="margin-top:12px"><button id="b-save" type="button" style="flex:1">Enregistrer et analyser</button>
       ${customs().some((x) => x.id === t.id) ? '<button class="danger" id="b-del" type="button">Supprimer</button>' : ''}</div>
     </div>
@@ -920,6 +921,14 @@ function renderBuilder() {
   $('#b-back').onclick = () => { editing = null; renderMine(); };
   $('#b-name').oninput = (e) => { t.name = e.target.value; };
   $('#mine').querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => openPicker(b.dataset.pick));
+  $('#mine').querySelectorAll('[data-rot]').forEach((sel) => sel.onchange = () => {
+    const [r, k] = sel.dataset.rot.split('-').map(Number);
+    const rot = currentRot(t);
+    const other = rot.flat().findIndex((x, i) => x === sel.value && i !== r * 2 + k);
+    if (other >= 0) { const flat = rot.flat(); flat[other] = flat[r * 2 + k]; flat[r * 2 + k] = sel.value; t.rot = [[flat[0], flat[1]], [flat[2], flat[3]]]; }
+    else { rot[r][k] = sel.value; t.rot = rot; }
+    renderBuilder();
+  });
   $('#b-save').onclick = () => {
     if (!t.leader) { toast('Choisis d\'abord un leader'); return; }
     const list = customs().filter((x) => x.id !== t.id);
@@ -995,14 +1004,132 @@ function leaderPct(L, c) {
   return best;
 }
 
+// ---------- Rotations d'une team créée à la main ----------
+// Clés : 'L' = leader, 'A' = ami, sinon l'identifiant d'une carte de la team
+function rotKeys(t) { return ['L', 'A', ...t.members]; }
+const abbr = (n) => String(n || '').replace(/Super Saiyan God SS/g, 'SSGSS').replace(/Super Saiyan God/g, 'SSG').replace(/Super Saiyan/g, 'SSJ');
+function keyName(t, k, withTitle = false) {
+  if (k === 'L') return `${abbr(state.byId.get(t.leader)?.name) || 'Leader'} (leader)`;
+  if (k === 'A') return 'Ami (copie du leader)';
+  const c = state.byId.get(k); if (!c) return '?';
+  const dup = withTitle || [t.leader, ...t.members].filter((x) => x !== k && state.byId.get(x)?.name === c.name).length > 0;
+  return dup ? `${abbr(c.name)} – ${c.title}` : abbr(c.name);
+}
+function currentRot(t) {
+  const keys = rotKeys(t);
+  const ok = Array.isArray(t.rot) && t.rot.length === 2 && t.rot.every((p) => p.length === 2 && p.every((k) => keys.includes(k)))
+    && new Set(t.rot.flat()).size === 4;
+  if (ok) return t.rot.map((p) => p.slice());
+  const m = t.members;
+  if (m.length >= 4) return [[m[0], m[1]], [m[2], m[3]]];
+  const pool = ['L', ...m, 'A'];
+  return [[pool[0], pool[1]], [pool[2], pool[3]]].map((p) => p.map((x) => x || 'A'));
+}
+function rotEditorHtml(t) {
+  if (!t.leader || t.members.length < 2) return '';
+  const rot = currentRot(t);
+  const keys = rotKeys(t);
+  const sel = (r, k) => `<select data-rot="${r}-${k}" aria-label="Rotation ${r + 1}, carte ${k + 1}">${keys.map((x) => `<option value="${esc(x)}"${rot[r][k] === x ? ' selected' : ''}>${esc(keyName(t, x, true))}</option>`).join('')}</select>`;
+  const floaters = keys.filter((x) => !rot.flat().includes(x));
+  return `<div class="label" style="margin-top:12px">Tes rotations <span class="muted small-text">(comme dans ton jeu)</span></div>
+    <div class="rot-ed"><b>Rotation 1</b>${sel(0, 0)}${sel(0, 1)}</div>
+    <div class="rot-ed"><b>Rotation 2</b>${sel(1, 0)}${sel(1, 1)}</div>
+    <p class="muted small-text" style="margin:2px 0 0">Flottants : ${floaters.map((x) => esc(keyName(t, x))).join(', ') || '—'}</p>`;
+}
+function rotIndices(t, rot) {
+  const idx = (k) => (k === 'L' ? 0 : k === 'A' ? 1 : 2 + t.members.indexOf(k));
+  return rot.map((p) => p.map(idx));
+}
+function indexKey(t, i) { return i === 0 ? 'L' : i === 1 ? 'A' : t.members[i - 2]; }
+
+// Quand jouer une carte, d'après son passif
+function passiveTiming(c, teamCards) {
+  const p = c.passive || '';
+  const tips = [];
+  let m;
+  if ((m = /starting from the (\d+)\w* turn/i.exec(p))) tips.push(`Ses effets démarrent au tour ${m[1]} : en rotation, elle joue un tour sur deux et y arrive plus vite.`);
+  if (/for every (turn|super attack|attack|ki sphere)|the more|stack/i.test(p)) tips.push('Ses bonus se cumulent à chaque passage : en rotation, elle monte en puissance plus vite qu\'en flottant.');
+  if ((m = /for (\d+) turns? from the character'?s entry/i.exec(p))) tips.push(`Très forte pendant ${m[1]} tour${m[1] > 1 ? 's' : ''} après son entrée : en rotation 1 pour ouvrir le combat, ou en flottant pour la faire entrer au bon moment.`);
+  if (/damage reduction|guards all attacks|chance of evading/i.test(p)) tips.push('Défensive : place-la en 1re position du tour, elle encaisse les attaques à la place des autres.');
+  if (/when hp is \d+% or less/i.test(p)) tips.push('Se renforce quand tes PV sont bas : utile en fin de combat.');
+  if (/revive|revives/i.test(p)) tips.push('Peut ressusciter : garde-la souvent sur le terrain.');
+  if (/transforms?\b|exchange/i.test(p)) tips.push('Se transforme en cours de combat : en rotation, elle atteint sa transformation plus tôt.');
+  const ally = /when there is another "?([^"\n]+?)"? (?:category )?ally attacking|ally attacking in the same turn|"([^"]+)" category ally attacking/i.exec(p);
+  if (ally) {
+    const cat = (ally[1] || ally[2] || '').replace(/ category$/i, '');
+    const mates = cat ? teamCards.filter((x) => x.id !== c.id && x.categories.includes(cat)).map((x) => x.name) : [];
+    tips.push(`Plus forte avec un allié${cat ? ` « ${cat} »` : ''} sur le même tour${mates.length ? ` : mets-la en rotation avec ${mates.slice(0, 2).join(' ou ')}` : ''}.`);
+  }
+  if (/as the 1st attacker|first attacker/i.test(p)) tips.push('Plus forte quand elle attaque en premier dans le tour.');
+  if (/allies'? (?:atk|ki)|all allies'/i.test(p) && !ally) tips.push('Booste ses alliés : mets-la à côté des cartes qui en profitent le plus.');
+  return tips.slice(0, 3);
+}
+
+function rotationAdvice(t, r) {
+  const T = r.team;
+  const U = T.units;
+  const card = (i) => state.byId.get(U[i].id);
+  const linksOf = (i, j) => shared(U[i], U[j]);
+  const fx = state.meta.linkEffects || {};
+  const pairHtml = (pair, label) => {
+    const [a, b] = pair; const names = linksOf(a, b); const tot = linkTotals(names);
+    const verdict = names.length >= 4 ? 'good' : names.length >= 2 ? '' : 'bad';
+    return `<li class="${names.length < 2 ? 'warn' : ''}"><b>${label}</b> : ${esc(keyName(t, indexKey(t, a)))} + ${esc(keyName(t, indexKey(t, b)))}
+      <span class="${verdict}">· ${names.length} lien${names.length > 1 ? 's' : ''} en commun${names.length ? ` (${esc(bonusTxt(tot))})` : ''}</span></li>`;
+  };
+  const user = T.rotations; const best = T.bestPairs || user;
+  const gain = T.bestScore && T.score ? (T.bestScore - T.score) / T.score * 100 : 0;
+  let html = `<h2 class="sec-h">Rotations</h2><p class="sec-p">Les 2 cartes d'une rotation jouent ensemble un tour sur deux : plus elles partagent de liens, plus elles tapent fort.</p>
+    <ul class="why rot-list">${user.map((p, k) => pairHtml(p, `Ta rotation ${k + 1}`)).join('')}</ul>`;
+  // Conseils de déplacement
+  const tips = [];
+  const inRot = new Map(); user.forEach(([a, b]) => { inRot.set(a, b); inRot.set(b, a); });
+  const n = U.length;
+  for (const [a, b] of user) {
+    for (const x of [a, b]) {
+      const partner = inRot.get(x); const cur = linksOf(x, partner).length;
+      let bestJ = -1; let bestN = cur;
+      for (let j = 0; j < n; j++) { if (j === x || j === partner) continue; const v = linksOf(x, j).length; if (v > bestN) { bestN = v; bestJ = j; } }
+      if (bestJ >= 0 && bestN - cur >= 2) tips.push(`${keyName(t, indexKey(t, x))} partage <b>${bestN} liens</b> avec ${keyName(t, indexKey(t, bestJ))}, contre ${cur} avec ${keyName(t, indexKey(t, partner))} : pense à les mettre ensemble.`);
+    }
+  }
+  const floaters = [...Array(n).keys()].filter((i) => !inRot.has(i));
+  for (const f of floaters) {
+    if (f === 1) continue;
+    const avg = [...inRot.keys()].reduce((s, i) => s + linksOf(f, i).length, 0) / Math.max(1, inRot.size);
+    if (avg < 2) tips.push(`${keyName(t, indexKey(t, f))} (flottant) partage peu de liens avec tes rotations (${avg.toFixed(1)} en moyenne) : elle tapera moins fort quand elle entre.`);
+  }
+  if (gain > 0.5) {
+    tips.unshift(`Disposition conseillée, <b>+${gain.toFixed(1)} % de puissance</b> : rotation 1 = ${best[0].map((i) => esc(keyName(t, indexKey(t, i)))).join(' + ')}, rotation 2 = ${best[1].map((i) => esc(keyName(t, indexKey(t, i)))).join(' + ')}.`);
+  }
+  html += tips.length ? `<ul class="why">${tips.map((x) => `<li class="warn">${x}</li>`).join('')}</ul>` : '<ul class="why"><li>Tes rotations sont déjà les meilleures possibles pour ces cartes.</li></ul>';
+  if (gain > 0.5) html += `<button class="block" id="apply-rot" type="button">Appliquer la disposition conseillée</button>`;
+  // Quand jouer chaque carte
+  const teamCards = U.filter((u) => u.role !== 'ami').map((u) => state.byId.get(u.id));
+  const timing = U.map((u, i) => ({ i, u })).filter(({ u }) => u.role !== 'ami').map(({ i, u }) => ({ i, c: state.byId.get(u.id), tips: passiveTiming(state.byId.get(u.id), teamCards) })).filter((x) => x.tips.length);
+  if (timing.length) {
+    html += `<h2 class="sec-h">Quand jouer chaque carte</h2><p class="sec-p">D'après leur passif.</p>
+      <ul class="timing">${timing.map((x) => `<li><b>${esc(x.c.name)}</b><span class="muted small-text"> · ${inRot.has(x.i) ? 'en rotation' : 'flottant'}</span><ul>${x.tips.map((tp) => `<li>${esc(tp)}</li>`).join('')}</ul></li>`).join('')}</ul>`;
+  }
+  state.bestRotKeys = best.map((p) => p.map((i) => indexKey(t, i)));
+  return html;
+}
+
 async function runAnalysis() {
   const t = editing; if (!t?.leader) return;
   const box = $('#analysis');
   box.innerHTML = '<div class="progress"><span style="width:60%"></span></div><p class="muted small-text">J\'analyse ta team…</p>';
   try {
-    const r = await run('analyze', { leader: t.leader, members: t.members });
+    const pairs = t.members.length >= 2 ? rotIndices(t, currentRot(t)) : null;
+    const r = await run('analyze', { leader: t.leader, members: t.members, pairs });
     if (!r) { box.innerHTML = ''; return; }
     box.innerHTML = analysisHtml(t, r);
+    $('#apply-rot')?.addEventListener('click', () => {
+      t.rot = state.bestRotKeys;
+      const list = customs().filter((x) => x.id !== t.id);
+      state.box.__custom = [{ ...t }, ...list]; saveBox();
+      renderBuilder(); toast('Rotations mises à jour');
+    });
   } catch (e) {
     box.innerHTML = `<div class="empty"><b>L'analyse a échoué</b>${esc(e.message)}</div>`;
   }
@@ -1059,6 +1186,7 @@ function analysisHtml(t, r) {
       <h2 class="sec-h">Avantages</h2><ul class="why">${pros.map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="warn">Pas d\'atout particulier pour l\'instant.</li>'}</ul>
       <h2 class="sec-h">Limites</h2><ul class="why">${cons.map((x) => `<li class="warn">${esc(x)}</li>`).join('') || '<li>Rien à signaler.</li>'}</ul>
     </section>
+    ${rotationAdvice(t, r)}
     ${teamHtml(T, 0, { tag: esc(t.name || 'Ma team'), compact: true })}
     <h2 class="sec-h">Cartes à aller chercher</h2><p class="sec-p">Les cartes du jeu qui feraient le plus progresser cette team.</p>
     ${up || '<div class="empty">Aucune carte ne ferait mieux pour l\'instant.</div>'}

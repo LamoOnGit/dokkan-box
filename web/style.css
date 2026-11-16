@@ -300,3 +300,12 @@ details.passive summary { cursor: pointer; color: var(--orange-hi); font-weight:
 .good { color: var(--good); } .bad { color: #ff8a80; }
 .verdict { margin-top: 6px; }
 .verdict .sec-h { margin-top: 16px; }
+.rot-ed { display: grid; grid-template-columns: 92px 1fr 1fr; gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; }
+.rot-ed select { width: 100%; font-size: 12px; padding: 8px 6px; }
+.rot-list li b { color: var(--text); }
+.timing { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 8px; }
+.timing > li { background: var(--panel); border-radius: var(--r-md); padding: 10px 12px; font-size: 14px; }
+.timing ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; display: grid; gap: 4px; }
+#apply-rot { margin-top: 10px; }
+.rot-ed { grid-template-columns: 1fr; gap: 6px; background: var(--panel2); border-radius: var(--r-md); padding: 10px; }
+.rot-ed select { font-size: 13px; padding: 9px 10px; background: var(--panel); }

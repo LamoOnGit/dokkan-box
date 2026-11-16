@@ -227,9 +227,10 @@ export const LINK_WEIGHT = 0.08;
 // En dessous de cette affinité (≈ 2 liens moyens partagés en moyenne avec chaque coéquipier), la carte est jugée isolée
 const ISO_MIN = 1.6;
 
-export function scoreTeam(units) {
-  // units : [{card, own, pw, boost, lf, role}]
+export function scoreTeam(units, pairs = null) {
+  // units : [{card, own, pw, boost, lf, role}] ; pairs : rotations imposées [[i, j], [k, l]] (sinon les meilleures)
   const rot = bestRotations(units);
+  if (pairs) rot.pairs = pairs;
   const inRot = new Map();
   rot.pairs.forEach(([x, y]) => { inRot.set(x, y); inRot.set(y, x); });
   const n = units.length;
@@ -427,18 +428,26 @@ export function topGameTeams(cards, { limit = 15, onProgress } = {}) {
 }
 
 // Analyse d'une team créée à la main : rotations, conseils, cartes et leaders à aller chercher
-export function analyzeTeam(cards, box, leaderId, memberIds) {
+export function analyzeTeam(cards, box, leaderId, memberIds, userPairs = null) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   const L = byId.get(leaderId);
   if (!L) return null;
   const ownOf = (c) => (box[c.id]?.count > 0 ? box[c.id] : FRESH_OWN);
   const members = memberIds.map((id) => byId.get(id)).filter(Boolean);
   const units = [unit(L, L, ownOf(L), 'leader'), unit(L, L, FRIEND_OWN, 'ami'), ...members.map((c) => unit(L, c, ownOf(c), 'membre'))];
-  const team = scoreTeam(units);
+  // Rotations choisies par le joueur (indices dans units), sinon les meilleures
+  const okPairs = Array.isArray(userPairs) && userPairs.length === 2
+    && userPairs.every((p) => p.length === 2 && p.every((i) => i >= 0 && i < units.length))
+    && new Set(userPairs.flat()).size === 4;
+  const best = scoreTeam(units);
+  const team = okPairs ? scoreTeam(units, userPairs) : best;
   team.leader = L;
   team.boostedCount = team.units.filter((u) => u.role === 'membre' && u.boost > 0).length;
   const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
   team.friends = recommendFriends(team, allLeaders);
+  team.bestPairs = best.rotations;
+  team.bestScore = best.score;
+  team.userPairs = okPairs;
   const base = team.score;
   const names = new Set([L.name, ...members.map((c) => c.name)]);
 

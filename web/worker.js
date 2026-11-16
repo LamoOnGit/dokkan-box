@@ -10,8 +10,8 @@ self.onmessage = (e) => {
       const teams = optimize(cards, box, { ...options, onProgress: progress });
       self.postMessage({ id, result: teams.map(slimTeam) });
     } else if (kind === 'analyze') {
-      const r = analyzeTeam(cards, box, options.leader, options.members);
-      self.postMessage({ id, result: r && { team: slimTeam(r.team), upgrades: r.upgrades, leaders: r.leaders } });
+      const r = analyzeTeam(cards, box, options.leader, options.members, options.pairs);
+      self.postMessage({ id, result: r && { team: { ...slimTeam(r.team), bestPairs: r.team.bestPairs, bestScore: r.team.bestScore, userPairs: r.team.userPairs }, upgrades: r.upgrades, leaders: r.leaders } });
     } else if (kind === 'fit') {
       const r = teamsWithCard(cards, box, options.cardId);
       self.postMessage({ id, result: { best: r.best, owned: r.owned, teams: r.teams.map((t) => ({ ...slimTeam(t), gain: t.gain })) } });
