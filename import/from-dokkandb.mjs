@@ -146,3 +146,21 @@ async function findAnnouncedEza(news, cards) {
   }
   return [...found.values()];
 }
+
+// Meilleures teams du jeu (toutes les cartes, investies au max), calculées une fois par jour
+try {
+  const E = await import('../web/engine.js');
+  const extraNow = JSON.parse(await readFile(OUT_EXTRA, 'utf8').catch(() => '{}'));
+  const linkFx = src.links || {};
+  E.setLinkEffects(linkFx);
+  E.setMeta(extraNow.tierlist || []);
+  const t0 = Date.now();
+  const top = E.topGameTeams(cards, { limit: 15 });
+  await writeFile(path.join(HERE, '..', 'web', 'data', 'top-teams.json'), JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    teams: top.map((t) => ({ ...E.slimTeam(t), category: t.category })),
+  }));
+  console.log(`Meilleures teams du jeu : ${top.length} (${Math.round((Date.now() - t0) / 1000)} s)`);
+} catch (e) {
+  console.log('Meilleures teams non calculées :', e.message);
+}

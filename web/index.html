@@ -73,6 +73,22 @@
 
     <!-- Onglet Optimiseur -->
     <section id="tab-opt" class="tab" hidden>
+      <div class="seg seg-sm subtabs" id="opt-sub" role="tablist" aria-label="Teams">
+        <button data-sub="sugg" class="on" type="button">Suggestions</button>
+        <button data-sub="top" type="button">Top du jeu</button>
+        <button data-sub="mine" type="button">Mes créations</button>
+      </div>
+      <div id="sub-top" hidden>
+        <div class="intro">
+          <h2>Les meilleures teams du jeu</h2>
+          <p class="muted">Calculées chaque matin avec toutes les cartes Global, investies au maximum. Une team par catégorie. Les cartes que tu as sont entourées en vert.</p>
+        </div>
+        <div id="top-results"></div>
+      </div>
+      <div id="sub-mine" hidden>
+        <div id="mine"></div>
+      </div>
+      <div id="sub-sugg">
       <div id="saved"></div>
       <div class="intro">
         <h2>Tes meilleures teams</h2>
@@ -87,6 +103,7 @@
         <div class="progress" id="opt-progress" hidden><span></span></div>
       </div>
       <div id="opt-results"></div>
+      </div>
     </section>
 
     <!-- Onglet À surveiller -->

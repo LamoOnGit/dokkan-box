@@ -280,3 +280,23 @@ details.passive summary { cursor: pointer; color: var(--orange-hi); font-weight:
 .lp .lv { color: var(--muted); font-weight: 400; font-size: 12px; }
 .ctrl-top .row .small { white-space: nowrap; }
 .tier-mini.off { background: var(--line); color: var(--muted); font-weight: 600; }
+.subtabs { margin-bottom: 12px; }
+.mini.have { border-color: var(--good); }
+.have-tag { font-size: 10px; color: var(--good); font-weight: 700; }
+.have-sum { margin: 10px 0 0; font-size: 14px; }
+.have-sum b { color: var(--good); }
+.builder .back { justify-self: start; margin-bottom: 4px; }
+.builder .slot-row { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); }
+.lead-slot { grid-template-columns: 110px !important; }
+.slot .mini { width: 100%; text-align: left; color: var(--text); font-weight: 400; padding: 5px; }
+.empty-slot { display: grid; place-items: center; align-content: center; gap: 4px; aspect-ratio: .78; background: var(--panel2); color: var(--muted); border: 2px dashed var(--line); border-radius: var(--r-md); font-size: 12px; font-weight: 600; padding: 6px; }
+.empty-slot .plus { font-size: 26px; color: var(--orange-hi); line-height: 1; }
+.pick-h { font-size: 26px; margin: 0 0 10px; }
+.pick-list { margin-top: 6px; }
+.pick-row { grid-template-columns: 56px 1fr auto; }
+.pick-row .art { width: 56px; }
+.pick-row.used { opacity: .45; }
+.pick-side { display: grid; gap: 4px; justify-items: end; }
+.good { color: var(--good); } .bad { color: #ff8a80; }
+.verdict { margin-top: 6px; }
+.verdict .sec-h { margin-top: 16px; }

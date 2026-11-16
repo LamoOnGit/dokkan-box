@@ -35,6 +35,7 @@ async function loadCards() {
   $('#demo-banner').hidden = !data.demo;
   try { const r = await fetch('data/extra.json', { cache: 'no-cache' }); state.extra = r.ok ? await r.json() : null; } catch { state.extra = null; }
   setMeta(state.extra?.tierlist || []);
+  try { const r = await fetch('data/top-teams.json', { cache: 'no-cache' }); state.top = r.ok ? await r.json() : null; } catch { state.top = null; }
   try { const r = await fetch('data/manual.json', { cache: 'no-cache' }); state.manual = r.ok ? await r.json() : {}; } catch { state.manual = {}; }
   const date = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('fr-FR') : '?';
   $('#credits').innerHTML = `${state.cards.length} cartes LR et UR Global, mises à jour le ${date}. Source : ${esc(data.source || 'wiki Dokkan')}.`;
@@ -431,16 +432,18 @@ function run(kind, options, onProgress) {
 }
 function bar(el, p) { el.hidden = false; el.firstElementChild.style.width = `${Math.round(p * 100)}%`; }
 
-function mini(u, highlight) {
+function mini(u, highlight, markOwned = false) {
   const c = state.byId.get(u.id);
+  const owned = state.box[u.id]?.count > 0;
   let role;
   if (u.role === 'leader') role = '<div class="role lead">Leader</div>';
   else if (u.role === 'ami') role = '<div class="role lead">Ami</div><div class="via">au choix, voir conseils</div>';
   else if (u.boost > 0) role = `<div class="role">+${u.boost} %</div>${u.via ? `<div class="via">${esc(u.via)}</div>` : ''}`;
   else role = '<div class="role off">Hors leader</div>';
-  const inv = u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
+  if (markOwned && u.role !== 'ami') role += owned ? '<div class="have-tag">✓ Dans ta box</div>' : '<div class="via">À aller chercher</div>';
+  const inv = !markOwned && u.own && u.id !== highlight ? `<div class="inv">×${u.own.count || 1} · AS ${Math.min(u.own.saLv || 1, c.saMax || 10)}/${c.saMax || 10}</div>` : '';
   const tb = tierOf(c) ? `<span class="tier-mini">${esc(tierOf(c))}</span>` : (u.role === 'membre' && !isMeta(c) ? '<span class="tier-mini off">hors méta</span>' : '');
-  return `<div class="mini${u.id === highlight ? ' missing' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}${tb}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
+  return `<div class="mini${u.id === highlight ? ' missing' : ''}${markOwned && owned ? ' have' : ''}" data-id="${esc(u.id)}" role="button" tabindex="0">${art(c)}${typeBadge(c)}${tb}<div class="nm">${esc(c.name)}</div>${role}${inv}</div>`;
 }
 
 function shared(a, b) {
@@ -448,7 +451,7 @@ function shared(a, b) {
   return la.filter((l) => lb.includes(l));
 }
 
-function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = null, savedIdx = null } = {}) {
+function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = null, savedIdx = null, markOwned = false, compact = false, extraTop = '', footer = '' } = {}) {
   const L = state.byId.get(t.leader);
   const units = t.units;
   const rotIdx = new Set(t.rotations.flat());
@@ -474,7 +477,7 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
   if (weak.length) why.push({ ok: false, txt: `Peu de liens avec l'équipe : ${weak.map((u) => state.byId.get(u.id).name).join(', ')}` });
   else why.push({ ok: true, txt: `Toutes les cartes partagent des liens entre elles (${(team.reduce((sum, u) => sum + avgLinks(u), 0) / team.length).toFixed(1)} en moyenne)` });
   const offMeta = team.filter((u) => u.role === 'membre' && !isMeta(state.byId.get(u.id)));
-  if (offMeta.length) why.push({ ok: false, txt: `Hors méta : ${offMeta.map((u) => state.byId.get(u.id).name).join(', ')}. C'est ce que ta box a de mieux pour cette place ; « À invoquer » te dit par quoi la remplacer.` });
+  if (offMeta.length) why.push({ ok: false, txt: `Hors méta : ${offMeta.map((u) => state.byId.get(u.id).name).join(', ')}. ${compact ? 'Regarde plus bas les cartes à aller chercher.' : 'C\'est ce que ta box a de mieux pour cette place ; « À invoquer » te dit par quoi la remplacer.'}` });
   t.rotations.forEach((r, k) => {
     const names = shared(units[r[0]], units[r[1]]);
     const n = names.length; const tot = linkTotals(names);
@@ -482,27 +485,29 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
   });
 
   const group = (title, sub, list, hint, extra = '') => `<div class="group"><div class="group-h">${title}${hint ? `<small>${hint}</small>` : ''}</div>
-    <p class="group-sub">${sub}</p><div class="slot-row">${list.map((u) => mini(u, highlight)).join('')}</div>${extra}</div>`;
+    <p class="group-sub">${sub}</p><div class="slot-row">${list.map((u) => mini(u, highlight, markOwned)).join('')}</div>${extra}</div>`;
 
   const key = teamKey(t);
   const isSaved = state.saved.some((x) => teamKey(x) === key);
   const saveBtn = savedIdx !== null
     ? `<button class="danger block" data-unsave="${savedIdx}" type="button">Supprimer cette team</button>`
     : saveIdx !== null ? `<button class="${isSaved ? 'ghost' : ''} block" data-save="${String(saveIdx).includes(':') ? saveIdx : 'opt:' + saveIdx}" type="button"${isSaved ? ' disabled' : ''}>${isSaved ? 'Team enregistrée' : 'Enregistrer cette team'}</button>` : '';
-  return `<article class="team${i === 0 && !highlight && savedIdx === null ? ' best' : ''}">
+  return `<article class="team${i === 0 && !highlight && savedIdx === null && !markOwned && !compact ? ' best' : ''}">
     <div class="team-head">${art(L)}
       <div><div class="team-tag">${tag || (i === 0 ? 'Ta meilleure team' : `Team n° ${i + 1}`)}</div>
       <div class="team-lead">${esc(L.name)}</div><div class="muted small-text">Leader : +${maxPct} % aux ${esc(leaderTarget(L))}</div></div></div>
     <div class="power"><span>Puissance</span><div class="bar"><span style="width:${Math.min(100, rel)}%"></span></div><b>${Math.round(t.score)}</b></div>
+    ${extraTop}
     ${friendLine(t, L)}
     ${best && rel !== 100 ? `<p class="muted small-text" style="margin:0">${rel} % de ta meilleure team</p>` : ''}
     <ul class="why">${why.map((w) => `<li class="${w.ok ? '' : 'warn'}">${esc(w.txt)}</li>`).join('')}</ul>
     ${t.rotations.map((r, k) => { const names = shared(units[r[0]], units[r[1]]);
       return group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]], '', linksDetail(names)); }).join('')}
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
-    ${linkPlanHtml(t)}
-    ${tipsHtml(t)}
+    ${markOwned ? '' : linkPlanHtml(t)}
+    ${markOwned ? '' : tipsHtml(t)}
     ${saveBtn}
+    ${footer}
   </article>`;
 }
 
@@ -669,6 +674,14 @@ $('#run-watch').onclick = async () => {
 };
 
 document.addEventListener('click', (e) => {
+  const oc = e.target.closest('[data-open-custom]');
+  if (oc) { editing = JSON.parse(JSON.stringify(customs()[Number(oc.dataset.openCustom)])); renderBuilder(); return; }
+  const ct = e.target.closest('[data-copy-top]');
+  if (ct) {
+    const tt = state.top.teams[Number(ct.dataset.copyTop)];
+    editing = { id: String(Date.now()), name: `Ma team ${tt.category}`, leader: tt.leader, members: tt.units.filter((u) => u.role === 'membre').map((u) => u.id) };
+    $('#opt-sub [data-sub="mine"]').click(); renderBuilder(); window.scrollTo(0, 0); return;
+  }
   const sv = e.target.closest('[data-save]');
   if (sv) {
     const [src, n] = sv.dataset.save.split(':');
@@ -686,7 +699,7 @@ document.addEventListener('click', (e) => {
   }
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #meta .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#top-results .mini[data-id], #top-results .friends li[data-id], #mine .mini[data-id], #mine .friends li[data-id], #mine .tips li[data-id], #mine .link-plan li[data-id], #mine button.item[data-id], #opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #meta .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 
@@ -803,6 +816,222 @@ function renderNews() {
       : '<p class="empty">Pas d\'info sur les bannières pour le moment.</p>');
   if ((x.news || []).length) html += sec('Nouvelles du jeu', '', `<ul class="news-list">${x.news.slice(0, 10).map((n) => `<li><a href="${esc(n.url)}" target="_blank" rel="noopener"><b>${esc(n.title)}</b><span>${frDate(n.date)}${n.tags?.length ? ' · ' + esc(n.tags.join(', ')) : ''}</span></a></li>`).join('')}</ul>`);
   $('#news').innerHTML = html;
+}
+
+/* ---------- Sous-onglets de « Mes teams » ---------- */
+let optSub = 'sugg';
+$('#opt-sub').onclick = (e) => {
+  const b = e.target.closest('[data-sub]'); if (!b) return;
+  optSub = b.dataset.sub;
+  $('#opt-sub').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  ['sugg', 'top', 'mine'].forEach((k) => { $(`#sub-${k}`).hidden = k !== optSub; });
+  if (optSub === 'top') renderTop();
+  if (optSub === 'mine') renderMine();
+};
+
+function renderTop() {
+  const teams = state.top?.teams || [];
+  if (!teams.length) { $('#top-results').innerHTML = '<div class="empty"><b>Pas encore calculées</b>Elles arrivent avec la prochaine mise à jour du matin.</div>'; return; }
+  const best = teams[0].score;
+  $('#top-results').innerHTML = teams.map((t, i) => {
+    const ids = t.units.filter((u) => u.role !== 'ami').map((u) => u.id);
+    const have = ids.filter((id) => state.box[id]?.count > 0).length;
+    const extra = `<p class="have-sum"><b>${have}/${ids.length}</b> cartes dans ta box${have === ids.length ? ' : tu peux la jouer telle quelle !' : ''}</p>`;
+    const foot = `<button class="ghost block" data-copy-top="${i}" type="button">Créer ma version de cette team</button>`;
+    return teamHtml(t, i, { tag: `${i + 1}. Team ${t.category}`, best, markOwned: true, extraTop: extra, footer: foot });
+  }).join('');
+}
+
+/* ---------- Mes créations : teams faites à la main ---------- */
+const customs = () => (Array.isArray(state.box.__custom) ? state.box.__custom : []);
+let editing = null; // { id, name, leader, members: [] }
+
+function renderMine() {
+  if (editing) return renderBuilder();
+  const list = customs();
+  $('#mine').innerHTML = `<div class="intro"><h2>Mes créations</h2>
+      <p class="muted">Compose ta propre team : je te dis ses avantages, ses limites, les liens à monter, et les cartes et leaders à aller chercher.</p>
+      <button class="block" id="mine-new" type="button">Créer une team</button></div>
+    ${list.length ? list.map((t, k) => {
+      const L = state.byId.get(t.leader);
+      return `<button class="item" data-open-custom="${k}" type="button">${L ? art(L) : '<div class="art"></div>'}
+        <div><div class="nm">${esc(t.name || 'Ma team')}</div><div class="sub">${L ? `Leader : ${esc(L.name)}` : 'Pas de leader'} · ${t.members.length}/5 cartes</div></div>
+        <div class="gain" style="color:var(--text)">›</div></button>`;
+    }).join('') : '<div class="empty">Tu n\'as pas encore créé de team.</div>'}`;
+  $('#mine-new').onclick = () => { editing = { id: String(Date.now()), name: '', leader: null, members: [] }; renderBuilder(); };
+}
+
+function slotHtml(id, label, attr) {
+  const c = id ? state.byId.get(id) : null;
+  if (!c) return `<button class="slot empty-slot" ${attr} type="button"><span class="plus">+</span><span>${label}</span></button>`;
+  const owned = state.box[id]?.count > 0;
+  return `<div class="slot"><button class="mini${owned ? ' have' : ''}" ${attr} type="button">${art(c)}${typeBadge(c)}${tierOf(c) ? `<span class="tier-mini">${esc(tierOf(c))}</span>` : ''}<div class="nm">${esc(c.name)}</div><div class="via">${owned ? '✓ Dans ta box' : 'Pas dans ta box'}</div></button></div>`;
+}
+
+function renderBuilder() {
+  const t = editing;
+  const slots = [];
+  for (let k = 0; k < 5; k++) slots.push(slotHtml(t.members[k], `Carte ${k + 1}`, `data-pick="m${k}"`));
+  $('#mine').innerHTML = `<div class="intro builder">
+      <button class="ghost small back" id="b-back" type="button">‹ Mes créations</button>
+      <label class="label" for="b-name">Nom de la team</label>
+      <input id="b-name" type="text" maxlength="40" placeholder="Ex. : Team Saiyans purs" value="${esc(t.name)}">
+      <div class="label">Leader</div>
+      <div class="slot-row lead-slot">${slotHtml(t.leader, 'Choisir le leader', 'data-pick="leader"')}</div>
+      <div class="label">Les 5 autres cartes <span class="muted small-text">(l'ami s'ajoute en jeu)</span></div>
+      <div class="slot-row">${slots.join('')}</div>
+      <p class="muted small-text" style="margin:4px 0 0">Touche une carte pour la changer ou la retirer.</p>
+      <div class="row" style="margin-top:12px"><button id="b-save" type="button" style="flex:1">Enregistrer et analyser</button>
+      ${customs().some((x) => x.id === t.id) ? '<button class="danger" id="b-del" type="button">Supprimer</button>' : ''}</div>
+    </div>
+    <div id="analysis"></div>`;
+  $('#b-back').onclick = () => { editing = null; renderMine(); };
+  $('#b-name').oninput = (e) => { t.name = e.target.value; };
+  $('#mine').querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => openPicker(b.dataset.pick));
+  $('#b-save').onclick = () => {
+    if (!t.leader) { toast('Choisis d\'abord un leader'); return; }
+    const list = customs().filter((x) => x.id !== t.id);
+    state.box.__custom = [{ ...t, name: t.name || `Team ${state.byId.get(t.leader).name}` }, ...list];
+    saveBox(); toast('Team enregistrée'); runAnalysis();
+  };
+  $('#b-del')?.addEventListener('click', (e) => {
+    if (e.target.dataset.armed !== '1') { e.target.dataset.armed = '1'; e.target.textContent = 'Confirmer'; return; }
+    state.box.__custom = customs().filter((x) => x.id !== t.id); saveBox(); editing = null; renderMine(); toast('Team supprimée');
+  });
+  if (t.leader && customs().some((x) => x.id === t.id)) runAnalysis();
+}
+
+function openPicker(slot) {
+  const t = editing;
+  const isLead = slot === 'leader';
+  const k = isLead ? -1 : Number(slot.slice(1));
+  const current = isLead ? t.leader : t.members[k];
+  const L = t.leader ? state.byId.get(t.leader) : null;
+  let mineOnly = ownedCount() > 0; let q = '';
+  const taken = new Set([t.leader, ...t.members].filter(Boolean).map((id) => state.byId.get(id)?.name));
+  const listHtml = () => {
+    let list = state.cards.filter((c) => (!mineOnly || state.box[c.id]?.count > 0) && (!q || q.split(/\s+/).every((w) => c._search.includes(w))));
+    const score = (c) => {
+      let s = 0;
+      if (isLead) s += Math.max(0, ...(c.leader || []).map((x) => x.pct)) / 10;
+      else if (L) { const b = (L.leader || []).length ? leaderPct(L, c) : 0; s += b > 0 ? 100 : 0; }
+      if (state.box[c.id]?.count > 0) s += 30;
+      if (tierOf(c)) s += 20; else if (isMeta(c)) s += 8;
+      return s;
+    };
+    list = list.map((c) => ({ c, s: score(c) })).sort((a, b) => b.s - a.s).slice(0, 60);
+    if (!list.length) return '<div class="empty">Aucune carte trouvée.</div>';
+    return list.map(({ c }) => {
+      const owned = state.box[c.id]?.count > 0;
+      const used = !isLead && taken.has(c.name) && c.id !== current;
+      const b = !isLead && L ? leaderPct(L, c) : null;
+      const tag = isLead ? `Leader +${Math.max(0, ...(c.leader || []).map((x) => x.pct))} %` : b == null ? '' : b > 0 ? `+${b} % avec ce leader` : 'Pas boostée par ce leader';
+      return `<button class="item pick-row${used ? ' used' : ''}" data-choose="${esc(c.id)}" type="button"${used ? ' disabled' : ''}>${art(c)}
+        <div><div class="nm">${esc(c.name)}</div><div class="sub">${esc(c.rarity)} · ${esc(c.title)}</div>
+        <div class="sub">${tag ? `<span class="${b === 0 ? 'bad' : 'good'}">${esc(tag)}</span>` : ''}${used ? ' · déjà dans la team' : ''}</div></div>
+        <div class="pick-side">${tierOf(c) ? `<span class="tier-pill">${esc(tierOf(c))}</span>` : ''}${owned ? '<span class="have-tag">✓</span>' : ''}</div></button>`;
+    }).join('');
+  };
+  openSheet(`<h2 class="pick-h">${isLead ? 'Choisir le leader' : `Choisir la carte ${k + 1}`}</h2>
+    <input id="p-q" type="search" placeholder="Chercher un perso, un titre, une catégorie…" autocomplete="off">
+    <div class="seg seg-sm" id="p-seg" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button data-p="mine" class="${mineOnly ? 'on' : ''}" type="button">Ma box</button><button data-p="all" class="${mineOnly ? '' : 'on'}" type="button">Tout le jeu</button></div>
+    ${current ? '<button class="danger block" id="p-remove" type="button">Retirer cette carte</button>' : ''}
+    <div id="p-list" class="pick-list">${listHtml()}</div>`);
+  const refresh = () => { $('#p-list').innerHTML = listHtml(); };
+  let tm; $('#p-q').oninput = (e) => { clearTimeout(tm); tm = setTimeout(() => { q = e.target.value.trim().toLowerCase(); refresh(); }, 150); };
+  $('#p-seg').onclick = (e) => { const b = e.target.closest('[data-p]'); if (!b) return; mineOnly = b.dataset.p === 'mine'; $('#p-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); refresh(); };
+  $('#p-list').onclick = (e) => {
+    const b = e.target.closest('[data-choose]'); if (!b || b.disabled) return;
+    if (isLead) t.leader = b.dataset.choose; else t.members[k] = b.dataset.choose;
+    t.members = t.members.filter(Boolean);
+    closeSheet(); renderBuilder();
+  };
+  $('#p-remove')?.addEventListener('click', () => {
+    if (isLead) t.leader = null; else t.members.splice(k, 1);
+    closeSheet(); renderBuilder();
+  });
+}
+
+function leaderPct(L, c) {
+  let best = 0;
+  for (const cl of L.leader || []) {
+    const ok = cl.allTypes || cl.cats.some((x) => c.categories.includes(x))
+      || (cl.classes.includes(c.class) && !cl.types.length)
+      || cl.types.some((x) => x.type === c.type && (!x.cls || x.cls === c.class));
+    if (ok) best = Math.max(best, cl.pct);
+  }
+  return best;
+}
+
+async function runAnalysis() {
+  const t = editing; if (!t?.leader) return;
+  const box = $('#analysis');
+  box.innerHTML = '<div class="progress"><span style="width:60%"></span></div><p class="muted small-text">J\'analyse ta team…</p>';
+  try {
+    const r = await run('analyze', { leader: t.leader, members: t.members });
+    if (!r) { box.innerHTML = ''; return; }
+    box.innerHTML = analysisHtml(t, r);
+  } catch (e) {
+    box.innerHTML = `<div class="empty"><b>L'analyse a échoué</b>${esc(e.message)}</div>`;
+  }
+}
+
+function analysisHtml(t, r) {
+  const T = r.team;
+  const team = T.units.filter((u) => u.role !== 'ami');
+  const members = T.units.filter((u) => u.role === 'membre');
+  const card = (u) => state.byId.get(u.id);
+  const avgLinks = (u) => { const o = team.filter((v) => v !== u); return o.length ? o.reduce((s, v) => s + shared(u, v).length, 0) / o.length : 0; };
+  const pros = []; const cons = [];
+  const boosted = members.filter((u) => u.boost > 0);
+  if (members.length && boosted.length === members.length) pros.push(`Toutes les cartes sont boostées par le leader (+${Math.min(...boosted.map((u) => u.boost))} % ou plus).`);
+  const notB = members.filter((u) => u.boost <= 0);
+  if (notB.length) cons.push(`Pas boostées par le leader : ${notB.map((u) => card(u).name).join(', ')}. Elles perdent tout le bonus du leader.`);
+  const avgAll = team.length ? team.reduce((s, u) => s + avgLinks(u), 0) / team.length : 0;
+  const weak = members.filter((u) => avgLinks(u) < 2);
+  if (avgAll >= 3) pros.push(`Très bonne entente des liens : ${avgAll.toFixed(1)} liens partagés en moyenne entre deux cartes.`);
+  else if (avgAll >= 2) pros.push(`Liens corrects : ${avgAll.toFixed(1)} liens partagés en moyenne entre deux cartes.`);
+  if (weak.length) cons.push(`Peu de liens avec l'équipe : ${weak.map((u) => card(u).name).join(', ')}.`);
+  const metaN = team.filter((u) => tierOf(card(u))).length;
+  if (metaN) pros.push(`${metaN} carte${metaN > 1 ? 's' : ''} de la tier list du moment.`);
+  const off = members.filter((u) => !isMeta(card(u)));
+  if (off.length) cons.push(`Cartes dépassées (hors tier list, sans sortie ou EZA récente) : ${off.map((u) => card(u).name).join(', ')}.`);
+  const tanks = team.filter((u) => { const f = card(u).pfx || {}; return f.dr >= 30 || f.evade >= 30 || f.guard >= 0.5; });
+  if (tanks.length >= 2) pros.push(`Bonne défense : ${tanks.length} cartes avec réduction de dégâts, esquive ou garde.`);
+  else if (tanks.length === 1) cons.push(`Une seule carte vraiment défensive (${card(tanks[0]).name}) : la team peut souffrir face aux gros boss.`);
+  else cons.push('Aucune carte avec réduction de dégâts, esquive ou garde : la team encaisse mal.');
+  const types = new Set(team.map((u) => card(u).type));
+  if (types.size >= 4) pros.push(`Bonne couverture des types (${[...types].join(', ')}).`);
+  else if (team.length >= 4) cons.push(`Peu de types différents (${[...types].join(', ')}) : prudence face à un ennemi qui les contre.`);
+  const notOwned = team.filter((u) => !(state.box[u.id]?.count > 0));
+  if (notOwned.length) cons.push(`Pas encore dans ta box : ${notOwned.map((u) => card(u).name).join(', ')}.`);
+  if (members.length < 5) cons.push(`La team n'a que ${members.length} carte${members.length > 1 ? 's' : ''} sur 5 en plus du leader.`);
+
+  const up = (r.upgrades || []).map((g) => {
+    const c = state.byId.get(g.id); const rep = g.replaced ? state.byId.get(g.replaced) : null;
+    return `<button class="item" data-id="${esc(g.id)}" type="button">${art(c)}
+      <div><div class="nm">${esc(c.name)}${tierOf(c) ? ` <span class="tier-pill">${esc(tierOf(c))}</span>` : ''}</div><div class="sub">${esc(c.title)}</div>
+      <div class="sub">${rep ? `À la place de ${esc(rep.name)}` : 'Sur une place libre'}${g.owned ? ' · <span class="good">déjà dans ta box !</span>' : ''}</div></div>
+      <div class="gain">+${g.pct.toFixed(1)} %<small>de puissance</small></div></button>`;
+  }).join('');
+  const leads = (r.leaders || []).map((g) => {
+    const c = state.byId.get(g.id);
+    const pct = Math.max(0, ...(c.leader || []).map((x) => x.pct));
+    return `<button class="item" data-id="${esc(g.id)}" type="button">${art(c)}
+      <div><div class="nm">${esc(c.name)}</div><div class="sub">${esc(c.title)} · +${pct} %</div>
+      <div class="sub">Booste ${g.covered}/${g.total} de tes cartes${g.owned ? ' · <span class="good">déjà dans ta box !</span>' : ''}</div></div>
+      <div class="gain">+${g.pct.toFixed(1)} %<small>de puissance</small></div></button>`;
+  }).join('');
+
+  return `<section class="verdict">
+      <h2 class="sec-h">Avantages</h2><ul class="why">${pros.map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="warn">Pas d\'atout particulier pour l\'instant.</li>'}</ul>
+      <h2 class="sec-h">Limites</h2><ul class="why">${cons.map((x) => `<li class="warn">${esc(x)}</li>`).join('') || '<li>Rien à signaler.</li>'}</ul>
+    </section>
+    ${teamHtml(T, 0, { tag: esc(t.name || 'Ma team'), compact: true })}
+    <h2 class="sec-h">Cartes à aller chercher</h2><p class="sec-p">Les cartes du jeu qui feraient le plus progresser cette team.</p>
+    ${up || '<div class="empty">Aucune carte ne ferait mieux pour l\'instant.</div>'}
+    <h2 class="sec-h">Leaders à aller chercher</h2><p class="sec-p">Avec les mêmes cartes, ces leaders rendraient la team plus forte.</p>
+    ${leads || '<div class="empty">Ton leader est déjà le meilleur choix pour ces cartes.</div>'}`;
 }
 
 /* ---------- Onglet Méta ---------- */

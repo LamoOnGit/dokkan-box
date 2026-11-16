@@ -378,6 +378,107 @@ export function optimize(cards, box, { focusCategory = null, focusClass = null, 
   return top;
 }
 
+// ---------- Équipes : format léger (pour l'app) ----------
+export function slimTeam(t) {
+  return {
+    score: t.score,
+    leader: t.leader.id,
+    friends: (t.friends || []).map((f) => ({ id: f.card.id, covered: f.covered, total: f.total, pct: f.pct, via: f.via })),
+    boostedCount: t.boostedCount,
+    tips: investTips(t),
+    rotations: t.rotations,
+    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, via: u.via, affinity: u.affinity, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
+  };
+}
+
+export const MAX_OWN = { count: 5, linkLv: 10, saLv: 99, pot: 100 };
+
+function unit(L, card, own, role) {
+  const r = boostReason(L, card);
+  return { card, own, role, pw: power(card, own), boost: r ? r.pct : 0, lf: linkFactor(own), via: r ? r.why : null };
+}
+
+// Meilleures teams du jeu : toutes les cartes, investies au max. Une team par catégorie principale.
+export function topGameTeams(cards, { limit = 15, onProgress } = {}) {
+  const box = {};
+  for (const c of cards) box[c.id] = MAX_OWN;
+  const leaders = cards.filter((c) => leaderMax(c) >= 150);
+  const pool = ownedPool(cards, box);
+  const teams = [];
+  leaders.forEach((L, i) => {
+    const t = bestTeamForLeader({ card: L, own: MAX_OWN }, pool, { candidates: 11 });
+    if (t) teams.push(t);
+    if (onProgress && i % 20 === 0) onProgress(i / leaders.length);
+  });
+  teams.sort((a, b) => b.score - a.score);
+  const seen = new Set(); const out = [];
+  const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
+  for (const t of teams) {
+    const vias = t.units.filter((u) => u.role === 'membre' && u.via).map((u) => u.via);
+    const main = vias.sort((a, b) => vias.filter((x) => x === b).length - vias.filter((x) => x === a).length)[0] || t.leader.name;
+    if (seen.has(main) || seen.has('L:' + t.leader.name)) continue;
+    seen.add(main); seen.add('L:' + t.leader.name);
+    t.category = main;
+    t.friends = recommendFriends(t, allLeaders);
+    out.push(t);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Analyse d'une team créée à la main : rotations, conseils, cartes et leaders à aller chercher
+export function analyzeTeam(cards, box, leaderId, memberIds) {
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const L = byId.get(leaderId);
+  if (!L) return null;
+  const ownOf = (c) => (box[c.id]?.count > 0 ? box[c.id] : FRESH_OWN);
+  const members = memberIds.map((id) => byId.get(id)).filter(Boolean);
+  const units = [unit(L, L, ownOf(L), 'leader'), unit(L, L, FRIEND_OWN, 'ami'), ...members.map((c) => unit(L, c, ownOf(c), 'membre'))];
+  const team = scoreTeam(units);
+  team.leader = L;
+  team.boostedCount = team.units.filter((u) => u.role === 'membre' && u.boost > 0).length;
+  const allLeaders = cards.filter((c) => leaderMax(c) >= 100);
+  team.friends = recommendFriends(team, allLeaders);
+  const base = team.score;
+  const names = new Set([L.name, ...members.map((c) => c.name)]);
+
+  // Cartes à aller chercher : remplacer un membre (ou compléter une place libre)
+  const cands = cards.filter((c) => !names.has(c.name) && leaderBoost(L, c) > 0)
+    .map((c) => ({ c, u: unit(L, c, ownOf(c), 'membre') }))
+    .sort((a, b) => b.u.pw * (1 + b.u.boost / 100) - a.u.pw * (1 + a.u.boost / 100)).slice(0, 160);
+  const head = units.slice(0, 2); const mem = units.slice(2);
+  const ups = [];
+  for (const { c, u } of cands) {
+    let best = { delta: 0, replaced: null };
+    if (mem.length < TEAM_SIZE) {
+      const s = scoreTeam([...head, ...mem, u]).score;
+      best = { delta: s - base, replaced: null };
+    }
+    for (let r = 0; r < mem.length; r++) {
+      const s = scoreTeam([...head, ...mem.map((m, j) => (j === r ? u : m))]).score;
+      if (s - base > best.delta) best = { delta: s - base, replaced: mem[r].card.id };
+    }
+    if (best.delta > 0) ups.push({ id: c.id, owned: Boolean(box[c.id]?.count > 0), pct: best.delta / base * 100, replaced: best.replaced });
+  }
+  ups.sort((a, b) => b.pct - a.pct);
+
+  // Leaders à aller chercher : même équipe, autre leader
+  const leaders = [];
+  for (const N of cards) {
+    if (N.id === L.id || leaderMax(N) < 120) continue;
+    const covered = members.filter((c) => leaderBoost(N, c) > 0).length;
+    if (covered < Math.max(1, members.length - 1)) continue;
+    const us = [unit(N, N, ownOf(N), 'leader'), unit(N, N, FRIEND_OWN, 'ami'), ...members.map((c) => unit(N, c, ownOf(c), 'membre'))];
+    const s = scoreTeam(us).score;
+    if (s > base * 1.01) leaders.push({ id: N.id, owned: Boolean(box[N.id]?.count > 0), pct: (s - base) / base * 100, covered, total: members.length });
+  }
+  leaders.sort((a, b) => b.pct - a.pct);
+  const seenL = new Set();
+  const leadersTop = leaders.filter((x) => { const n = byId.get(x.id).name; return seenL.has(n) ? false : seenL.add(n); }).slice(0, 6);
+
+  return { team, upgrades: ups.slice(0, 8), leaders: leadersTop };
+}
+
 // Dans quelles teams jouer une carte (possédée ou non) : meilleures teams qui l'incluent
 export function teamsWithCard(cards, box, cardId, { limit = 3 } = {}) {
   const card = cards.find((c) => c.id === cardId);

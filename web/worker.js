@@ -1,4 +1,4 @@
-import { optimize, watchlist, setLinkEffects, setMeta, investTips, teamsWithCard } from './engine.js';
+import { optimize, watchlist, setLinkEffects, setMeta, teamsWithCard, slimTeam, analyzeTeam } from './engine.js';
 
 self.onmessage = (e) => {
   const { id, kind, cards, box, options, links } = e.data;
@@ -9,6 +9,9 @@ self.onmessage = (e) => {
     if (kind === 'optimize') {
       const teams = optimize(cards, box, { ...options, onProgress: progress });
       self.postMessage({ id, result: teams.map(slimTeam) });
+    } else if (kind === 'analyze') {
+      const r = analyzeTeam(cards, box, options.leader, options.members);
+      self.postMessage({ id, result: r && { team: slimTeam(r.team), upgrades: r.upgrades, leaders: r.leaders } });
     } else if (kind === 'fit') {
       const r = teamsWithCard(cards, box, options.cardId);
       self.postMessage({ id, result: { best: r.best, owned: r.owned, teams: r.teams.map((t) => ({ ...slimTeam(t), gain: t.gain })) } });
@@ -32,14 +35,3 @@ self.onmessage = (e) => {
   }
 };
 
-function slimTeam(t) {
-  return {
-    score: t.score,
-    leader: t.leader.id,
-    friends: (t.friends || []).map((f) => ({ id: f.card.id, covered: f.covered, total: f.total, pct: f.pct, via: f.via })),
-    boostedCount: t.boostedCount,
-    tips: investTips(t),
-    rotations: t.rotations,
-    units: t.units.map((u) => ({ id: u.card.id, role: u.role, boost: u.boost, via: u.via, affinity: u.affinity, eff: u.eff, linkBonus: u.linkBonus, own: u.role === 'ami' ? null : u.own })),
-  };
-}
