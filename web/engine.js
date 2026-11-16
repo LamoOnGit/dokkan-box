@@ -209,6 +209,20 @@ function bestRotations(units) {
     }
   }
   let best = { v: -1, pairs: [] };
+  // Comme dans le jeu : place 1 = leader (rotation 1 avec la place 2), place 7 = ami (toujours flottant)
+  if (units[0]?.role === 'leader' && units[1]?.role === 'ami' && n >= 5) {
+    for (let p = 2; p < n; p++) {
+      for (let c = 2; c < n; c++) {
+        if (c === p) continue;
+        for (let d = c + 1; d < n; d++) {
+          if (d === p) continue;
+          const v = m[0][p] + m[c][d];
+          if (v > best.v) best = { v, pairs: [[0, p], [c, d]] };
+        }
+      }
+    }
+    return { ...best, matrix: m };
+  }
   for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
     for (let c = a + 1; c < n; c++) {
       if (c === b) continue;

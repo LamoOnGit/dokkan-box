@@ -309,3 +309,8 @@ details.passive summary { cursor: pointer; color: var(--orange-hi); font-weight:
 #apply-rot { margin-top: 10px; }
 .rot-ed { grid-template-columns: 1fr; gap: 6px; background: var(--panel2); border-radius: var(--r-md); padding: 10px; }
 .rot-ed select { font-size: 13px; padding: 9px 10px; background: var(--panel); }
+.placed { display: grid; gap: 4px; }
+.place-lbl { font-size: 11px; color: var(--muted); font-weight: 600; }
+.place-lbl.r1 { color: var(--orange-hi); } .place-lbl.r2 { color: #8fb7ff; }
+.swap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.swap span { width: 100%; }

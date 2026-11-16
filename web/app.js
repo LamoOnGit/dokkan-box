@@ -903,17 +903,17 @@ function slotHtml(id, label, attr) {
 function renderBuilder() {
   const t = editing;
   const slots = [];
-  for (let k = 0; k < 5; k++) slots.push(slotHtml(t.members[k], `Carte ${k + 1}`, `data-pick="m${k}"`));
+  const PLACE = ['Place 2 · rotation 1', 'Place 3 · rotation 2', 'Place 4 · rotation 2', 'Place 5 · flottant', 'Place 6 · flottant'];
+  for (let k = 0; k < 5; k++) slots.push(`<div class="placed"><div class="place-lbl r${k < 1 ? 1 : k < 3 ? 2 : 0}">${PLACE[k]}</div>${slotHtml(t.members[k], `Carte ${k + 2}`, `data-pick="m${k}"`)}</div>`);
   $('#mine').innerHTML = `<div class="intro builder">
       <button class="ghost small back" id="b-back" type="button">‹ Mes créations</button>
       <label class="label" for="b-name">Nom de la team</label>
       <input id="b-name" type="text" maxlength="40" placeholder="Ex. : Team Saiyans purs" value="${esc(t.name)}">
       <div class="label">Leader</div>
-      <div class="slot-row lead-slot">${slotHtml(t.leader, 'Choisir le leader', 'data-pick="leader"')}</div>
-      <div class="label">Les 5 autres cartes <span class="muted small-text">(l'ami s'ajoute en jeu)</span></div>
+      <div class="slot-row lead-slot"><div class="placed"><div class="place-lbl r1">Place 1 · rotation 1</div>${slotHtml(t.leader, 'Choisir le leader', 'data-pick="leader"')}</div></div>
+      <div class="label">Les 5 autres cartes, dans l'ordre de ton équipe <span class="muted small-text">(place 7 = l'ami, toujours flottant)</span></div>
       <div class="slot-row">${slots.join('')}</div>
-      <p class="muted small-text" style="margin:4px 0 0">Touche une carte pour la changer ou la retirer.</p>
-      ${rotEditorHtml(t)}
+      <p class="muted small-text" style="margin:4px 0 0">Comme dans le jeu : places 1-2 = rotation 1, places 3-4 = rotation 2, places 5, 6 et 7 = flottants. Touche une carte pour la changer, la retirer ou l'échanger de place.</p>
       <div class="row" style="margin-top:12px"><button id="b-save" type="button" style="flex:1">Enregistrer et analyser</button>
       ${customs().some((x) => x.id === t.id) ? '<button class="danger" id="b-del" type="button">Supprimer</button>' : ''}</div>
     </div>
@@ -921,14 +921,7 @@ function renderBuilder() {
   $('#b-back').onclick = () => { editing = null; renderMine(); };
   $('#b-name').oninput = (e) => { t.name = e.target.value; };
   $('#mine').querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => openPicker(b.dataset.pick));
-  $('#mine').querySelectorAll('[data-rot]').forEach((sel) => sel.onchange = () => {
-    const [r, k] = sel.dataset.rot.split('-').map(Number);
-    const rot = currentRot(t);
-    const other = rot.flat().findIndex((x, i) => x === sel.value && i !== r * 2 + k);
-    if (other >= 0) { const flat = rot.flat(); flat[other] = flat[r * 2 + k]; flat[r * 2 + k] = sel.value; t.rot = [[flat[0], flat[1]], [flat[2], flat[3]]]; }
-    else { rot[r][k] = sel.value; t.rot = rot; }
-    renderBuilder();
-  });
+
   $('#b-save').onclick = () => {
     if (!t.leader) { toast('Choisis d\'abord un leader'); return; }
     const list = customs().filter((x) => x.id !== t.id);
@@ -973,9 +966,10 @@ function openPicker(slot) {
         <div class="pick-side">${tierOf(c) ? `<span class="tier-pill">${esc(tierOf(c))}</span>` : ''}${owned ? '<span class="have-tag">✓</span>' : ''}</div></button>`;
     }).join('');
   };
-  openSheet(`<h2 class="pick-h">${isLead ? 'Choisir le leader' : `Choisir la carte ${k + 1}`}</h2>
+  openSheet(`<h2 class="pick-h">${isLead ? 'Choisir le leader' : `Place ${k + 2}`}</h2>
     <input id="p-q" type="search" placeholder="Chercher un perso, un titre, une catégorie…" autocomplete="off">
     <div class="seg seg-sm" id="p-seg" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button data-p="mine" class="${mineOnly ? 'on' : ''}" type="button">Ma box</button><button data-p="all" class="${mineOnly ? '' : 'on'}" type="button">Tout le jeu</button></div>
+    ${!isLead && current && t.members.length > 1 ? `<div class="swap"><span>Échanger de place avec :</span>${t.members.map((id, j) => j === k ? '' : `<button class="ghost small" data-swap="${j}" type="button">Place ${j + 2} · ${esc(abbr(state.byId.get(id)?.name))}</button>`).join('')}</div>` : ''}
     ${current ? '<button class="danger block" id="p-remove" type="button">Retirer cette carte</button>' : ''}
     <div id="p-list" class="pick-list">${listHtml()}</div>`);
   const refresh = () => { $('#p-list').innerHTML = listHtml(); };
@@ -987,6 +981,10 @@ function openPicker(slot) {
     t.members = t.members.filter(Boolean);
     closeSheet(); renderBuilder();
   };
+  $('#sheet').querySelectorAll('[data-swap]').forEach((b) => b.onclick = () => {
+    const j = Number(b.dataset.swap); [t.members[k], t.members[j]] = [t.members[j], t.members[k]];
+    closeSheet(); renderBuilder();
+  });
   $('#p-remove')?.addEventListener('click', () => {
     if (isLead) t.leader = null; else t.members.splice(k, 1);
     closeSheet(); renderBuilder();
@@ -1080,16 +1078,17 @@ function rotationAdvice(t, r) {
   const user = T.rotations; const best = T.bestPairs || user;
   const gain = T.bestScore && T.score ? (T.bestScore - T.score) / T.score * 100 : 0;
   let html = `<h2 class="sec-h">Rotations</h2><p class="sec-p">Les 2 cartes d'une rotation jouent ensemble un tour sur deux : plus elles partagent de liens, plus elles tapent fort.</p>
-    <ul class="why rot-list">${user.map((p, k) => pairHtml(p, `Ta rotation ${k + 1}`)).join('')}</ul>`;
+    <ul class="why rot-list">${user.map((p, k) => pairHtml(p, `Rotation ${k + 1} (places ${k ? '3-4' : '1-2'})`)).join('')}</ul>`;
   // Conseils de déplacement
   const tips = [];
   const inRot = new Map(); user.forEach(([a, b]) => { inRot.set(a, b); inRot.set(b, a); });
   const n = U.length;
   for (const [a, b] of user) {
     for (const x of [a, b]) {
+      if (x === 0 || x === 1) continue; // le leader (place 1) et l'ami (place 7) ne bougent pas
       const partner = inRot.get(x); const cur = linksOf(x, partner).length;
       let bestJ = -1; let bestN = cur;
-      for (let j = 0; j < n; j++) { if (j === x || j === partner) continue; const v = linksOf(x, j).length; if (v > bestN) { bestN = v; bestJ = j; } }
+      for (let j = 0; j < n; j++) { if (j === x || j === partner || j === 1 || j === 0) continue; const v = linksOf(x, j).length; if (v > bestN) { bestN = v; bestJ = j; } }
       if (bestJ >= 0 && bestN - cur >= 2) tips.push(`${keyName(t, indexKey(t, x))} partage <b>${bestN} liens</b> avec ${keyName(t, indexKey(t, bestJ))}, contre ${cur} avec ${keyName(t, indexKey(t, partner))} : pense à les mettre ensemble.`);
     }
   }
@@ -1100,10 +1099,11 @@ function rotationAdvice(t, r) {
     if (avg < 2) tips.push(`${keyName(t, indexKey(t, f))} (flottant) partage peu de liens avec tes rotations (${avg.toFixed(1)} en moyenne) : elle tapera moins fort quand elle entre.`);
   }
   if (gain > 0.5) {
-    tips.unshift(`Disposition conseillée, <b>+${gain.toFixed(1)} % de puissance</b> : rotation 1 = ${best[0].map((i) => esc(keyName(t, indexKey(t, i)))).join(' + ')}, rotation 2 = ${best[1].map((i) => esc(keyName(t, indexKey(t, i)))).join(' + ')}.`);
+    const p2 = best[0].find((i) => i !== 0);
+    tips.unshift(`Ordre conseillé, <b>+${gain.toFixed(1)} % de puissance</b> : place 2 = ${esc(keyName(t, indexKey(t, p2)))} (avec ton leader), places 3-4 = ${best[1].map((i) => esc(keyName(t, indexKey(t, i)))).join(' + ')}, le reste en flottant.`);
   }
   html += tips.length ? `<ul class="why">${tips.map((x) => `<li class="warn">${x}</li>`).join('')}</ul>` : '<ul class="why"><li>Tes rotations sont déjà les meilleures possibles pour ces cartes.</li></ul>';
-  if (gain > 0.5) html += `<button class="block" id="apply-rot" type="button">Appliquer la disposition conseillée</button>`;
+  if (gain > 0.5) html += `<button class="block" id="apply-rot" type="button">Appliquer l'ordre conseillé</button>`;
   // Quand jouer chaque carte
   const teamCards = U.filter((u) => u.role !== 'ami').map((u) => state.byId.get(u.id));
   const timing = U.map((u, i) => ({ i, u })).filter(({ u }) => u.role !== 'ami').map(({ i, u }) => ({ i, c: state.byId.get(u.id), tips: passiveTiming(state.byId.get(u.id), teamCards) })).filter((x) => x.tips.length);
@@ -1120,12 +1120,16 @@ async function runAnalysis() {
   const box = $('#analysis');
   box.innerHTML = '<div class="progress"><span style="width:60%"></span></div><p class="muted small-text">J\'analyse ta team…</p>';
   try {
-    const pairs = t.members.length >= 2 ? rotIndices(t, currentRot(t)) : null;
+    // Ordre de l'équipe : leader (0) + place 2 = rotation 1 ; places 3-4 = rotation 2
+    const pairs = t.members.length >= 3 ? [[0, 2], [3, 4]] : null;
     const r = await run('analyze', { leader: t.leader, members: t.members, pairs });
     if (!r) { box.innerHTML = ''; return; }
     box.innerHTML = analysisHtml(t, r);
     $('#apply-rot')?.addEventListener('click', () => {
-      t.rot = state.bestRotKeys;
+      const [r1, r2] = state.bestRotKeys;
+      const p2 = r1.find((x) => x !== 'L');
+      const order = [p2, ...r2.filter((x) => x !== 'L' && x !== 'A')];
+      t.members = [...order, ...t.members.filter((id) => !order.includes(id))];
       const list = customs().filter((x) => x.id !== t.id);
       state.box.__custom = [{ ...t }, ...list]; saveBox();
       renderBuilder(); toast('Rotations mises à jour');
