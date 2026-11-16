@@ -117,9 +117,12 @@ function showAuth() {
 // Transfert de box : l'ancien site envoie ses données dans l'adresse (#import=…)
 function importFromHash() {
   const h = location.hash || '';
-  if (!h.startsWith('#import=')) return;
+  if (!h.startsWith('#import=') && !h.startsWith('#b=')) return;
   try {
-    const data = JSON.parse(decodeURIComponent(h.slice(8)));
+    // Format court : #b=id.exemplaires-id-id.3…  (exemplaires = 1 si absent)
+    const data = h.startsWith('#b=')
+      ? { box: Object.fromEntries(h.slice(3).split('-').filter(Boolean).map((x) => { const [id, n] = x.split('.'); return [id, { count: Number(n || 1), linkLv: 1, saLv: 1 }]; })), teams: [] }
+      : JSON.parse(decodeURIComponent(h.slice(8)));
     const inBox = data.box || {};
     let n = 0;
     for (const [id, v] of Object.entries(inBox)) {
