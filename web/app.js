@@ -135,6 +135,7 @@ function importFromHash() {
     const keys = new Set(state.saved.map((t) => (t.units || []).map((u) => u.id).sort().join('-')));
     for (const t of data.teams || []) { const k = (t.units || []).map((u) => u.id).sort().join('-'); if (!keys.has(k)) state.saved.push(t); }
     saveBox();
+    if (typeof renderGrid === 'function' && $('#grid')) setTimeout(() => renderGrid(), 0);
     setTimeout(() => toast(`Box importée : ${n} cartes`), 300);
   } catch {
     setTimeout(() => toast('Import impossible : lien incomplet'), 300);
@@ -145,6 +146,8 @@ function importFromHash() {
 async function startApp() {
   await loadBox();
   importFromHash();
+  // Lien d'import ouvert alors que le site est déjà ouvert : seule l'adresse change, sans rechargement
+  window.addEventListener('hashchange', () => { importFromHash(); renderGrid(); });
   $('#app').hidden = false; $('#tabs').hidden = false; $('#auth').hidden = true; $('#account').hidden = false;
   if (state.user) {
     $('#account').textContent = 'Déconnexion';

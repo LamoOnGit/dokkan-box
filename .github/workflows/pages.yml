@@ -27,6 +27,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Version des fichiers (évite l'ancienne version en cache)
+        run: |
+          V=${GITHUB_SHA::8}
+          sed -i -E "s#(style\.css|app\.js)(\?v=[^\"]*)?\"#\1?v=$V\"#g" web/index.html
+          sed -i -E "s#from '\./(engine|config)\.js'#from './\1.js?v=$V'#g" web/app.js
+          sed -i -E "s#new Worker\('worker\.js'#new Worker('worker.js?v=$V'#" web/app.js
+          sed -i -E "s#from '\./engine\.js'#from './engine.js?v=$V'#g" web/worker.js
+          grep -n "?v=" web/index.html web/app.js web/worker.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
