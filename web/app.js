@@ -114,8 +114,34 @@ function showAuth() {
   };
 }
 
+// Transfert de box : l'ancien site envoie ses données dans l'adresse (#import=…)
+function importFromHash() {
+  const h = location.hash || '';
+  if (!h.startsWith('#import=')) return;
+  try {
+    const data = JSON.parse(decodeURIComponent(h.slice(8)));
+    const inBox = data.box || {};
+    let n = 0;
+    for (const [id, v] of Object.entries(inBox)) {
+      if (id.startsWith('__')) { if (!state.box[id]) state.box[id] = v; continue; }
+      if (!v || !(v.count > 0)) continue;
+      const cur = state.box[id];
+      state.box[id] = cur ? { ...v, ...cur, count: Math.max(cur.count || 0, v.count) } : v;
+      n++;
+    }
+    const keys = new Set(state.saved.map((t) => (t.units || []).map((u) => u.id).sort().join('-')));
+    for (const t of data.teams || []) { const k = (t.units || []).map((u) => u.id).sort().join('-'); if (!keys.has(k)) state.saved.push(t); }
+    saveBox();
+    setTimeout(() => toast(`Box importée : ${n} cartes`), 300);
+  } catch {
+    setTimeout(() => toast('Import impossible : lien incomplet'), 300);
+  }
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
 async function startApp() {
   await loadBox();
+  importFromHash();
   $('#app').hidden = false; $('#tabs').hidden = false; $('#auth').hidden = true; $('#account').hidden = false;
   if (state.user) {
     $('#account').textContent = 'Déconnexion';
