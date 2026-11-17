@@ -48,6 +48,21 @@ export function passiveMult(card) {
   return { off: Math.sqrt(off), def: Math.sqrt(def) };
 }
 
+// Super attaques : multiplicateur de dégâts × multiplicateur de Ki (12 Ki ≈ ×1,5 ; 18 Ki des LR ≈ ×2)
+// et hausses d'ATK/DEF. Comparé à une UR « supreme + raises ATK » de référence, amorti (puissance 0,4).
+const SA_REF = 1.5 * 2.6 * 1.3;
+export function saFactor(card) {
+  const sa = card.sa;
+  if (!sa) return { off: 1, def: 1, pUltra: 0 };
+  const ki = card.pfx?.ki || 0;
+  const pUltra = card.usa ? (ki >= 4 ? 0.7 : ki >= 2 ? 0.55 : 0.4) : 0; // chance de jouer à 18 Ki
+  const d12 = 1.5 * sa.mult * (1 + sa.atk);
+  const d18 = card.usa ? 2 * card.usa.mult * (1 + card.usa.atk) : 0;
+  const d = (1 - pUltra) * d12 + pUltra * d18;
+  const defB = (1 - pUltra) * sa.def + pUltra * (card.usa?.def || 0);
+  return { off: Math.min(1.5, Math.max(0.8, (d / SA_REF) ** 0.4)), def: Math.sqrt(1 + 0.5 * defB), pUltra };
+}
+
 // Bonus méta : la tier list du moment donne un vrai bonus ; une carte hors tier list perd un peu
 // selon l'ancienneté de sa sortie ou de sa dernière EZA (les anciennes cartes non réveillées sont dépassées)
 export function freshYears(card) {
@@ -78,7 +93,9 @@ export function power(card, own = DEFAULT_OWN) {
   const pf = potentialOf(own);
   const st = card.stats || {};
   const pm = passiveMult(card);
-  let p = stat(st.atk, pf) * pm.off + stat(st.def, pf) * 0.7 * pm.def + stat(st.hp, pf) * 0.25;
+  const sf = saFactor(card);
+  let p = stat(st.atk, pf) * pm.off * sf.off + stat(st.def, pf) * 0.7 * pm.def * sf.def + stat(st.hp, pf) * 0.25;
+  if (card.active) p *= 1.03; // compétence active : petit bonus
   if (!p) p = (card.rarity === 'LR' ? 30000 : 24000) * 1.5; // stats absentes : valeur par défaut
   const saMax = card.saMax || 10;
   const sa = Math.min(own.saLv || 1, saMax);
@@ -303,7 +320,7 @@ export function recommendFriends(team, allLeaders, n = 3) {
 }
 
 // pool : [{card, own}] ; leader : {card, own}
-export function bestTeamForLeader(leader, pool, { candidates = 12, force = null } = {}) {
+export function bestTeamForLeader(leader, pool, { candidates = 15, force = null } = {}) {
   const L = leader.card;
   const mk = (card, own, role) => {
     const r = boostReason(L, card);
@@ -421,7 +438,7 @@ export function topGameTeams(cards, { limit = 15, onProgress } = {}) {
   const pool = ownedPool(cards, box);
   const teams = [];
   leaders.forEach((L, i) => {
-    const t = bestTeamForLeader({ card: L, own: MAX_OWN }, pool, { candidates: 11 });
+    const t = bestTeamForLeader({ card: L, own: MAX_OWN }, pool, { candidates: 13 });
     if (t) teams.push(t);
     if (onProgress && i % 20 === 0) onProgress(i / leaders.length);
   });
@@ -578,7 +595,7 @@ export function watchlist(cards, box, topTeams, { onProgress } = {}) {
   leaderCands.forEach((c, i) => {
     const eligible = pool.filter((p) => leaderBoost(c, p.card) > 0);
     if (eligible.length < 4) return;
-    const t = bestTeamForLeader({ card: c, own: FRESH_OWN }, pool, { candidates: 9 });
+    const t = bestTeamForLeader({ card: c, own: FRESH_OWN }, pool, { candidates: 10 });
     if (t && t.score > bestScore * 0.97) newLeaders.push({ card: c, team: t, pct: bestScore ? (t.score - bestScore) / bestScore * 100 : 0 });
     if (onProgress && i % 20 === 0) onProgress(0.5 + 0.5 * i / leaderCands.length);
   });

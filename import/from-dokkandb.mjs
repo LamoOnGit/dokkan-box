@@ -7,7 +7,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseLeaderSkill } from './parse-card.mjs';
-import { parsePassive, passiveText } from './parse-passive.mjs';
+import { parsePassive, passiveText, parseSA } from './parse-passive.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = 'https://raw.githubusercontent.com/waltz4replica/dokkandb/main/data/cards.json';
@@ -21,6 +21,12 @@ const POTENTIAL_BONUS = { hp: 5000, atk: 5000, def: 5000 };
 const decode = (s) => String(s || '')
   .replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
   .replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+
+function saOf(sa) {
+  if (!sa?.name) return null;
+  const txt = sa.seza || sa.eza || sa.base || '';
+  return { name: decode(sa.name), text: decode(txt), ...parseSA(txt) };
+}
 
 async function load(url = SRC, local = process.argv[2]) {
   if (local) return JSON.parse(await readFile(local, 'utf8'));
@@ -62,6 +68,10 @@ for (const c of src.cards) {
     passiveName: decode(c.passive?.name || ''),
     passive: passiveText(c.passive?.seza || c.passive?.eza || c.passive?.base || ''),
     pfx: parsePassive(c.passive?.seza || c.passive?.eza || c.passive?.base || ''),
+    // Super attaques : 12 Ki (et 18 Ki pour les LR), avec multiplicateur et hausses de stats
+    sa: saOf(c.superAttack),
+    usa: c.rarity === 'LR' ? saOf(c.ultraSuperAttack) : null,
+    active: c.active?.name ? { name: decode(c.active.name), desc: decode(c.active.desc || ''), cond: decode(c.active.condition || '') } : null,
     eza: Boolean(c.eza || c.seza),
     ezaDate: c.dates?.glbSeza || c.dates?.glbEza || null,
     ezaKind: c.dates?.glbSeza ? 'SEZA' : c.dates?.glbEza ? 'EZA' : null,

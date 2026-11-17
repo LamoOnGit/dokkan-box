@@ -3,7 +3,11 @@ name: Import des cartes
 on:
   workflow_dispatch:        # bouton "Run workflow" dans l'onglet Actions
   schedule:
-    - cron: '17 5 * * *'    # tous les jours vers 6 h (heure de Paris en hiver)
+    # 3 fois par jour : GitHub retarde souvent les tâches planifiées de plusieurs heures,
+    # comme ça les nouveautés arrivent dans la journée quoi qu'il arrive
+    - cron: '41 3 * * *'
+    - cron: '41 10 * * *'
+    - cron: '41 17 * * *'
 
 permissions:
   contents: write

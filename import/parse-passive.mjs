@@ -113,3 +113,28 @@ export function parsePassive(html) {
   fx.dr = Math.min(fx.dr, 80); fx.evade = Math.min(fx.evade, 80); fx.crit = Math.min(fx.crit, 100); fx.guard = Math.min(fx.guard, 1);
   return fx;
 }
+
+// ---- Super attaques ----
+// Multiplicateur de dégâts selon le mot employé (valeurs approximatives Global, SA au max)
+export const SA_MULT = { low: 1.3, damage: 1.7, huge: 2.0, destructive: 2.0, extreme: 2.2, mass: 2.2, supreme: 2.6, immense: 2.9, colossal: 3.5, 'mega-colossal': 4.5, ultimate: 5.5, 'super-intense': 6 };
+const RAISE = { raises: 0.3, 'greatly raises': 0.5, 'massively raises': 1.0, 'tremendously raises': 1.0, 'immensely raises': 1.0, 'hugely raises': 1.0 };
+
+// « Raises ATK, greatly raises DEF for 1 turn, causes colossal damage… »
+export function parseSA(html) {
+  const t = decodeHtml(String(html || '').replace(/<[^>]+>/g, ' ')).toLowerCase();
+  if (!t) return null;
+  const dm = /causes (?:an? )?([\w-]+) damage/.exec(t);
+  const out = { mult: SA_MULT[dm?.[1]] || 2.2, atk: 0, def: 0 };
+  // Chaque « raises » s'applique à la stat citée juste après (ATK, DEF ou ATK & DEF)
+  for (const m of t.matchAll(/((?:greatly |massively |tremendously |immensely |hugely )?raises) (atk & def|atk|def)(?: and (atk|def))?/g)) {
+    const v = RAISE[m[1]] ?? 0.3;
+    const rest = t.slice(m.index, m.index + 80);
+    const stacks = !/for (\d+) turns?|for 1 turn/.test(rest.split(',')[0] + (rest.split(',')[1] || '')) ; // sans durée = cumulable
+    const w = stacks ? 1.6 : 1;
+    const stats = (m[2] + ' ' + (m[3] || '')).trim();
+    if (/atk/.test(stats)) out.atk += v * w;
+    if (/def/.test(stats)) out.def += v * w;
+  }
+  out.atk = Math.round(out.atk * 100) / 100; out.def = Math.round(out.def * 100) / 100;
+  return out;
+}

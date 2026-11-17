@@ -84,8 +84,7 @@ function toast(msg) {
 /* ---------- Connexion ---------- */
 async function initAuth() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    $('#account').textContent = 'Sans compte';
-    $('#account').onclick = () => toast('Box gardée sur cet appareil');
+    $('#account').textContent = 'Sauvegarde';
     return startApp();
   }
   const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
@@ -114,44 +113,130 @@ function showAuth() {
   };
 }
 
-// Transfert de box : l'ancien site envoie ses données dans l'adresse (#import=…)
-function importFromHash() {
-  const h = location.hash || '';
-  if (!h.startsWith('#import=') && !h.startsWith('#b=')) return;
-  try {
-    // Format court : #b=id.exemplaires-id-id.3…  (exemplaires = 1 si absent)
-    const data = h.startsWith('#b=')
-      ? { box: Object.fromEntries(h.slice(3).split('-').filter(Boolean).map((x) => { const [id, n] = x.split('.'); return [id, { count: Number(n || 1), linkLv: 1, saLv: 1 }]; })), teams: [] }
-      : JSON.parse(decodeURIComponent(h.slice(8)));
-    const inBox = data.box || {};
-    let n = 0;
-    for (const [id, v] of Object.entries(inBox)) {
-      if (id.startsWith('__')) { if (!state.box[id]) state.box[id] = v; continue; }
-      if (!v || !(v.count > 0)) continue;
-      const cur = state.box[id];
-      state.box[id] = cur ? { ...v, ...cur, count: Math.max(cur.count || 0, v.count) } : v;
-      n++;
+// ---------- Sauvegarde / restauration de la box ----------
+const BACKUP_KEY = 'dokkan-backup-at';
+const b64u = (bytes) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64u = (str) => { const s = atob(str.replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
+const backupData = () => ({ app: 'dokkan-box', v: 1, at: new Date().toISOString(), box: state.box, teams: state.saved });
+
+// Lien qui contient toute la box (compressée) : #z=…
+async function backupLink() {
+  const json = JSON.stringify(backupData());
+  const base = location.origin + location.pathname;
+  if (window.CompressionStream) {
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    return `${base}#z=${b64u(new Uint8Array(await new Response(stream).arrayBuffer()))}`;
+  }
+  return `${base}#import=${encodeURIComponent(json)}`;
+}
+async function readZ(str) {
+  const stream = new Blob([unb64u(str)]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return JSON.parse(await new Response(stream).text());
+}
+function markBackup() { try { localStorage.setItem(BACKUP_KEY, new Date().toISOString()); } catch { /* rien */ } }
+function lastBackup() { try { return localStorage.getItem(BACKUP_KEY); } catch { return null; } }
+
+// Fusionne une box importée. restore = sauvegarde complète : ses réglages (potentiel, liens, SA) l'emportent.
+function mergeImport(data, restore = false) {
+  const inBox = data.box || {};
+  let n = 0;
+  for (const [id, v] of Object.entries(inBox)) {
+    if (id.startsWith('__')) {
+      if (!state.box[id]) state.box[id] = v;
+      else if (id === '__custom' && Array.isArray(v)) { const have = new Set(state.box[id].map((t) => t.id)); for (const t of v) if (!have.has(t.id)) state.box[id].push(t); }
+      else if (restore) state.box[id] = { ...state.box[id], ...v };
+      continue;
     }
-    const keys = new Set(state.saved.map((t) => (t.units || []).map((u) => u.id).sort().join('-')));
-    for (const t of data.teams || []) { const k = (t.units || []).map((u) => u.id).sort().join('-'); if (!keys.has(k)) state.saved.push(t); }
-    saveBox();
-    if (typeof renderGrid === 'function' && $('#grid')) setTimeout(() => renderGrid(), 0);
+    if (!v || !(v.count > 0)) continue;
+    const cur = state.box[id];
+    state.box[id] = !cur ? v : restore ? { ...cur, ...v, count: Math.max(cur.count || 0, v.count) } : { ...v, ...cur, count: Math.max(cur.count || 0, v.count) };
+    n++;
+  }
+  const keys = new Set(state.saved.map((t) => (t.units || []).map((u) => u.id).sort().join('-')));
+  for (const t of data.teams || []) { const k = (t.units || []).map((u) => u.id).sort().join('-'); if (!keys.has(k)) state.saved.push(t); }
+  saveBox();
+  return n;
+}
+
+// Liens d'import : #z= (sauvegarde complète), #import= (JSON), #b=id.exemplaires-id…
+async function importFromHash() {
+  const h = location.hash || '';
+  if (!/^#(import|b|z)=/.test(h)) return false;
+  try {
+    let data; let restore = false;
+    if (h.startsWith('#z=')) { data = await readZ(h.slice(3)); restore = true; }
+    else if (h.startsWith('#b=')) data = { box: Object.fromEntries(h.slice(3).split('-').filter(Boolean).map((x) => { const [id, n] = x.split('.'); return [id, { count: Number(n || 1), linkLv: 1, saLv: 1 }]; })), teams: [] };
+    else { data = JSON.parse(decodeURIComponent(h.slice(8))); restore = data.app === 'dokkan-box'; }
+    const n = mergeImport(data, restore);
     setTimeout(() => toast(`Box importée : ${n} cartes`), 300);
   } catch {
     setTimeout(() => toast('Import impossible : lien incomplet'), 300);
   }
   history.replaceState(null, '', location.pathname + location.search);
+  return true;
+}
+
+function backupSheet() {
+  const last = lastBackup();
+  const lastTxt = last ? `Dernière sauvegarde : ${new Date(last).toLocaleDateString('fr-FR')}` : 'Aucune sauvegarde pour l’instant';
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone;
+  openSheet(`<h2 class="sheet-title">Sauvegarder ma box</h2>
+    <p class="muted">${ownedCount()} cartes, ${state.saved.length + (state.box.__custom || []).length} teams. ${esc(lastTxt)}.</p>
+    ${state.user ? '<p class="ok-line">Connecté : ta box est aussi sauvegardée en ligne.</p>' : '<p class="muted small-text">Sans compte, ta box vit seulement dans ce navigateur. Garde une copie ici, ça prend 2 secondes.</p>'}
+    <button id="bk-share" class="block" type="button">Envoyer mon lien de sauvegarde</button>
+    <p class="muted small-text">Un lien qui contient toute ta box (doublons, potentiel, liens, SA) et tes teams. Envoie-le toi (Notes, WhatsApp, mail). Pour restaurer, il suffit de l'ouvrir.</p>
+    <button id="bk-file" class="ghost block" type="button">Télécharger le fichier de sauvegarde</button>
+    <label class="ghost block file-btn">Restaurer depuis un fichier<input id="bk-in" type="file" accept=".json,application/json" hidden></label>
+    ${standalone ? '' : `<div class="tip-box"><b>Conseil iPhone :</b> Safari peut effacer les données d'un site après quelques jours sans visite. Ajoute Dokkan Box à ton écran d'accueil (bouton Partager, puis « Sur l'écran d'accueil ») : elle s'ouvrira comme une app et ta box ne sera plus effacée.</div>`}`);
+  $('#bk-share').onclick = async () => {
+    const url = await backupLink();
+    markBackup();
+    try {
+      if (navigator.share) { await navigator.share({ title: 'Sauvegarde Dokkan Box', text: `Ma box Dokkan (${ownedCount()} cartes)`, url }); return; }
+    } catch (e) { if (e?.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(url); toast('Lien copié'); } catch { prompt('Copie ce lien :', url); }
+  };
+  $('#bk-file').onclick = () => {
+    const blob = new Blob([JSON.stringify(backupData())], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `dokkan-box-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    markBackup(); toast('Fichier enregistré');
+  };
+  $('#bk-in').onchange = async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      const n = mergeImport(data, true);
+      closeSheet(); renderGrid(); renderGuide(); renderSaved();
+      toast(`Box restaurée : ${n} cartes`);
+    } catch { toast('Fichier illisible'); }
+  };
+}
+
+// Rappel discret si la box n'a jamais été sauvegardée (ou pas depuis 2 semaines)
+function backupNudge() {
+  if (state.user || ownedCount() < 3) return '';
+  const last = lastBackup();
+  if (last && Date.now() - Date.parse(last) < 14 * 864e5) return '';
+  return `<div class="guide-mini nudge"><span>💾 ${last ? 'Ta dernière sauvegarde date un peu.' : 'Ta box n’est sauvegardée nulle part.'} Garde une copie en 2 secondes.</span>
+    <button class="small" id="nudge-bk" type="button">Sauvegarder</button></div>`;
 }
 
 async function startApp() {
   await loadBox();
-  importFromHash();
+  await importFromHash();
   // Lien d'import ouvert alors que le site est déjà ouvert : seule l'adresse change, sans rechargement
-  window.addEventListener('hashchange', () => { importFromHash(); renderGrid(); });
+  window.addEventListener('hashchange', async () => { if (await importFromHash()) { renderGrid(); renderGuide(); renderSaved(); } });
+  // Demande au navigateur de ne pas effacer les données du site
+  try { navigator.storage?.persist?.(); } catch { /* rien */ }
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  $('#account').onclick = backupSheet;
   $('#app').hidden = false; $('#tabs').hidden = false; $('#auth').hidden = true; $('#account').hidden = false;
   if (state.user) {
-    $('#account').textContent = 'Déconnexion';
-    $('#account').onclick = async () => { await state.sb.auth.signOut(); location.reload(); };
+    $('#account').textContent = 'Compte';
+    $('#account').onclick = () => { backupSheet(); const b = document.createElement('button'); b.className = 'ghost block'; b.type = 'button'; b.textContent = 'Se déconnecter'; b.onclick = async () => { await state.sb.auth.signOut(); location.reload(); }; $('#sheet').append(b); };
   }
   renderFilters();
   renderGuide();
@@ -177,6 +262,14 @@ const orbStar = (size) => `<span class="orb" style="--s:${size}px"><i></i></span
 
 /* ---------- Guide ---------- */
 function renderGuide() {
+  renderGuideInner();
+  const nb = backupNudge();
+  if (nb) {
+    $('#guide').insertAdjacentHTML('afterbegin', nb);
+    $('#nudge-bk').onclick = backupSheet;
+  }
+}
+function renderGuideInner() {
   const n = ownedCount();
   let hidden = false;
   try { hidden = localStorage.getItem(GUIDE_KEY) === '1'; } catch { /* rien */ }
@@ -757,7 +850,17 @@ function forceHtml(c) {
       <p>${tier ? `<span class="tier-pill">${esc(tier)}</span> Classée <b>${esc(tier)}</b> dans la tier list du moment. ` : ''}Ce que l'outil retient de son passif${c.ezaKind ? ` (version ${esc(c.ezaKind)})` : ''}, en moyenne sur un combat :</p>
       <div class="pfx">${chips.map((x) => `<span class="pill dark">${esc(x)}</span>`).join('') || '<span class="muted small-text">Aucun effet chiffrable trouvé.</span>'}</div>
     </div>
+    ${saHtml(c)}
     ${c.passive ? `<details class="passive"><summary>Lire son passif${c.passiveName ? ` : ${esc(c.passiveName)}` : ''}</summary><div class="ptext">${esc(c.passive).replace(/\n/g, '<br>')}</div></details>` : ''}`;
+}
+
+// Super attaques et active, en clair
+const DMG_FR = { 1.3: 'faibles', 1.7: 'normaux', 2: 'énormes', 2.2: 'extrêmes', 2.6: 'suprêmes', 2.9: 'immenses', 3.5: 'colossaux', 4.5: 'méga-colossaux', 5.5: 'ultimes', 6: 'super-intenses' };
+function saHtml(c) {
+  const line = (label, sa) => sa ? `<p class="sa-line"><b>${label}</b> ${esc(sa.name)} : dégâts ${DMG_FR[sa.mult] || 'standards'} (×${String(sa.mult).replace('.', ',')})${sa.atk ? `, ATK ↑` : ''}${sa.def ? `, DEF ↑` : ''}<br><span class="muted small-text">${esc(sa.text)}</span></p>` : '';
+  const act = c.active ? `<p class="sa-line"><b>Active</b> ${esc(c.active.name)} : ${esc(c.active.desc)}<br><span class="muted small-text">${esc(c.active.cond)}</span></p>` : '';
+  if (!c.sa && !act) return '';
+  return `<details class="passive"><summary>Super attaques${c.active ? ' et active' : ''}</summary>${line('12 Ki', c.sa)}${line('18 Ki', c.usa)}${act}</details>`;
 }
 
 /* ---------- EZA annoncée (ajoutée à la main) ---------- */
