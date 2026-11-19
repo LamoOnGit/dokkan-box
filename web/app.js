@@ -1045,11 +1045,9 @@ function openPicker(slot) {
   const current = isLead ? t.leader : t.members[k];
   const L = t.leader ? state.byId.get(t.leader) : null;
   let mineOnly = ownedCount() > 0; let q = '';
-  // Règle du jeu : 2 cartes du même nom exact ne peuvent pas être dans la même team (l'ami ne compte pas).
-  // Des Trunks différents (Trunks (Teen), Super Saiyan Trunks (Teen), Trunks (Kid)…) restent possibles.
+  // Seule la même carte exacte ne peut pas être mise deux fois. Des persos du même nom (cartes différentes) sont permis.
   const takenBy = new Map();
-  [t.leader, ...t.members].forEach((id, j) => { const c = id && state.byId.get(id); if (c && id !== current) takenBy.set(c.name, j === 0 ? 'ton leader' : `la place ${j + 1}`); });
-  const taken = takenBy;
+  [t.leader, ...t.members].forEach((id, j) => { if (id && id !== current) takenBy.set(id, j === 0 ? 'ton leader' : `la place ${j + 1}`); });
   const listHtml = () => {
     let list = state.cards.filter((c) => (!mineOnly || state.box[c.id]?.count > 0) && (!q || q.split(/\s+/).every((w) => c._search.includes(w))));
     const score = (c) => {
@@ -1064,12 +1062,12 @@ function openPicker(slot) {
     if (!list.length) return '<div class="empty">Aucune carte trouvée.</div>';
     return list.map(({ c }) => {
       const owned = state.box[c.id]?.count > 0;
-      const used = taken.has(c.name) && c.id !== current;
+      const used = takenBy.has(c.id);
       const b = !isLead && L ? leaderPct(L, c) : null;
       const tag = isLead ? `Leader +${Math.max(0, ...(c.leader || []).map((x) => x.pct))} %` : b == null ? '' : b > 0 ? `+${b} % avec ce leader` : 'Pas boostée par ce leader';
       return `<button class="item pick-row${used ? ' used' : ''}" data-choose="${esc(c.id)}" type="button"${used ? ' disabled' : ''}>${art(c)}
         <div><div class="nm">${esc(c.name)}</div><div class="sub">${esc(c.rarity)} · ${esc(c.title)}</div>
-        <div class="sub">${tag ? `<span class="${b === 0 ? 'bad' : 'good'}">${esc(tag)}</span>` : ''}</div>${used ? `<div class="sub bad">Même nom que ${esc(takenBy.get(c.name))} : le jeu interdit 2 cartes du même nom dans une team</div>` : ''}</div>
+        <div class="sub">${tag ? `<span class="${b === 0 ? 'bad' : 'good'}">${esc(tag)}</span>` : ''}</div>${used ? `<div class="sub bad">Déjà utilisée : c'est ${esc(takenBy.get(c.id))}</div>` : ''}</div>
         <div class="pick-side">${tierOf(c) ? `<span class="tier-pill">${esc(tierOf(c))}</span>` : ''}${owned ? '<span class="have-tag">✓</span>' : ''}</div></button>`;
     }).join('');
   };
