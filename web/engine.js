@@ -331,20 +331,20 @@ export function bestTeamForLeader(leader, pool, { candidates = 15, force = null 
   const leadU = mk(L, leader.own, 'leader');
   const friendU = mk(L, FRIEND_OWN, 'ami'); // place de l'ami : comptée comme un leader équivalent
 
-  // Une carte par nom de personnage (règle du jeu), hors nom du leader
+  // Chaque carte une seule fois (des cartes différentes du même perso sont permises), hors leader
   const byName = new Map();
   for (const p of pool) {
-    if (p.card.id === L.id || p.card.name === L.name) continue;
+    if (p.card.id === L.id) continue;
     const u = mk(p.card, p.own, 'membre');
     u.pre = u.pw * (1 + u.boost / 100) * (1 + 0.02 * sharedLinks(L, p.card));
-    const prev = byName.get(p.card.name);
-    if (!prev || prev.pre < u.pre) byName.set(p.card.name, u);
+    const prev = byName.get(p.card.id);
+    if (!prev || prev.pre < u.pre) byName.set(p.card.id, u);
   }
   // Carte imposée (onglet Actu / fiche carte) : elle est toujours dans la team
   let forced = null;
   if (force && force !== L.id) {
     const fp = pool.find((p) => p.card.id === force);
-    if (fp && fp.card.name !== L.name) { forced = mk(fp.card, fp.own, 'membre'); byName.delete(fp.card.name); }
+    if (fp) { forced = mk(fp.card, fp.own, 'membre'); byName.delete(fp.card.id); }
   }
   // Pré-sélection en deux temps :
   // 1) on garde les cartes qui RENTRENT dans la team : boostées par le leader ET bien liées au reste des cartes boostées
@@ -480,10 +480,10 @@ export function analyzeTeam(cards, box, leaderId, memberIds, userPairs = null) {
   team.bestScore = best.score;
   team.userPairs = okPairs;
   const base = team.score;
-  const names = new Set([L.name, ...members.map((c) => c.name)]);
+  const names = new Set([L.id, ...members.map((c) => c.id)]);
 
   // Cartes à aller chercher : remplacer un membre (ou compléter une place libre)
-  const cands = cards.filter((c) => !names.has(c.name) && leaderBoost(L, c) > 0)
+  const cands = cards.filter((c) => !names.has(c.id) && leaderBoost(L, c) > 0)
     .map((c) => ({ c, u: unit(L, c, ownOf(c), 'membre') }))
     .sort((a, b) => b.u.pw * (1 + b.u.boost / 100) - a.u.pw * (1 + a.u.boost / 100)).slice(0, 160);
   const head = units.slice(0, 2); const mem = units.slice(2);
@@ -516,7 +516,53 @@ export function analyzeTeam(cards, box, leaderId, memberIds, userPairs = null) {
   const seenL = new Set();
   const leadersTop = leaders.filter((x) => { const n = byId.get(x.id).name; return seenL.has(n) ? false : seenL.add(n); }).slice(0, 6);
 
-  return { team, upgrades: ups.slice(0, 8), leaders: leadersTop };
+  return { team, upgrades: ups.slice(0, 8), leaders: leadersTop, fixes: weakFixes(cards, box, team) };
+}
+
+// Cartes faibles d'une team (pas boostée, peu de liens, hors méta) et par quoi les remplacer :
+// la meilleure carte de la box et la meilleure à aller chercher, à la même place.
+export function weakFixes(cards, box, team, { max = 3 } = {}) {
+  const lu = team.units.find((u) => u.role === 'leader');
+  if (!lu) return [];
+  const L = lu.card;
+  const ownOf = (c) => (box[c.id]?.count > 0 ? box[c.id] : FRESH_OWN);
+  const head = [lu, ...team.units.filter((u) => u.role === 'ami')];
+  const mem = team.units.filter((u) => u.role === 'membre');
+  const pairs = team.units.length === mem.length + 2 && mem.length >= 3 && team.userPairs ? [[0, 2], [3, 4]] : null;
+  const score = (m) => scoreTeam([...head, ...m], pairs).score;
+  const base = score(mem);
+  const core = [lu, ...mem];
+  const linksAvg = (c, others) => (others.length ? others.reduce((n, o) => n + sharedLinkNames(c, o.card).length, 0) / others.length : 0);
+  const inTeam = new Set(core.map((u) => u.card.id));
+  const pool = cards.filter((c) => !inTeam.has(c.id) && !c.upcoming && leaderBoost(L, c) > 0);
+  const owned = pool.filter((c) => box[c.id]?.count > 0);
+  const out = []; const usedRep = new Set();
+  for (let r = 0; r < mem.length && out.length < max; r++) {
+    const u = mem[r];
+    const others = core.filter((v) => v !== u);
+    const lk = linksAvg(u.card, others);
+    const why = [];
+    if (!(u.boost > 0)) why.push('pas boostée par le leader');
+    if (lk < 2) why.push('peu de liens');
+    if (!isMeta(u.card)) why.push('hors méta');
+    if (!why.length) continue;
+    const test = (c) => {
+      const nu = unit(L, c, ownOf(c), 'membre');
+      const s = score(mem.map((m, j) => (j === r ? nu : m)));
+      return { id: c.id, pct: (s - base) / base * 100, links: linksAvg(c, others), meta: isMeta(c) };
+    };
+    // Une remplaçante doit corriger le problème sans faire baisser la team (petite marge si elle corrige les liens)
+    const good = (x) => x.links >= Math.max(2, lk) && (x.meta || !isMeta(u.card)) && x.pct > (lk < 2 ? -3 : 0.5);
+    const rank = (a, b) => b.pct + 4 * b.links - (a.pct + 4 * a.links);
+    const fromBox = owned.filter((c) => !usedRep.has(c.id)).map(test).filter(good).sort(rank)[0] || null;
+    const quick = (c) => power(c, FRESH_OWN) * (1 + leaderBoost(L, c) / 100) * (1 + 0.15 * linksAvg(c, others));
+    const buyPool = pool.filter((c) => !(box[c.id]?.count > 0) && !usedRep.has(c.id)).sort((a, b) => quick(b) - quick(a)).slice(0, 120);
+    const toGet = buyPool.map(test).filter(good).sort(rank)[0] || null;
+    if (fromBox) usedRep.add(fromBox.id);
+    if (toGet) usedRep.add(toGet.id);
+    if (fromBox || toGet) out.push({ id: u.card.id, why, links: lk, owned: fromBox, buy: toGet });
+  }
+  return out;
 }
 
 // Dans quelles teams jouer une carte (possédée ou non) : meilleures teams qui l'incluent
@@ -560,15 +606,14 @@ export function watchlist(cards, box, topTeams, { onProgress } = {}) {
     const L = team.units[0].card;
     const base = team.score;
     const members = team.units.slice(2);
-    const teamNames = new Set(team.units.map((u) => u.card.name));
+    const teamIds = new Set(team.units.map((u) => u.card.id));
     for (const c of missing) {
       const boost = leaderBoost(L, c);
       if (boost <= 0) continue;
       const u = { card: c, own: FRESH_OWN, role: 'membre', pw: power(c, FRESH_OWN), boost, lf: linkFactor(FRESH_OWN) };
       let bestDelta = 0; let replaced = null;
       for (let r = 0; r < members.length; r++) {
-        if (teamNames.has(c.name) && members[r].card.name !== c.name) continue;
-        if (c.name === L.name) continue;
+        if (teamIds.has(c.id) || c.id === L.id) continue;
         const next = team.units.slice(0, 2).concat(members.map((m, j) => (j === r ? u : m)));
         const s = scoreTeam(next).score;
         if (s - base > bestDelta) { bestDelta = s - base; replaced = members[r].card; }

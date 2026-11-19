@@ -324,3 +324,19 @@ label.file-btn { display: block; text-align: center; background: var(--panel2); 
 .guide-mini.nudge { border: 1px solid var(--orange); }
 .sa-line { font-size: 14px; margin: 4px 0; }
 .sa-line b { color: var(--orange-hi); }
+
+/* Remplacements des cartes faibles */
+.fixes { margin: 12px 0; }
+.fix { background: var(--panel2); border-radius: var(--r-md); padding: 10px; margin-top: 10px; }
+.fix-h { margin: 0 0 6px; font-size: 14px; }
+.fix-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.fix-row:first-of-type { border-top: 0; }
+.fix-row .art { width: 52px; }
+.fix-row .nm { font-weight: 600; line-height: 1.2; }
+.fix-row .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.fix-row button.small { margin-top: 6px; }
+.fix-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.fix-lbl.good { color: var(--good); }
+.fix-none { margin: 4px 0; }
+.gain.flat { color: var(--muted); font-size: 22px; }
+.gain small { display: block; font-family: 'Rubik', sans-serif; font-size: 11px; max-width: 90px; }

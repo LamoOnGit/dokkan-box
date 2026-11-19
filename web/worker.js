@@ -1,4 +1,4 @@
-import { optimize, watchlist, setLinkEffects, setMeta, teamsWithCard, slimTeam, analyzeTeam } from './engine.js';
+import { weakFixes, optimize, watchlist, setLinkEffects, setMeta, teamsWithCard, slimTeam, analyzeTeam } from './engine.js';
 
 self.onmessage = (e) => {
   const { id, kind, cards, box, options, links } = e.data;
@@ -8,10 +8,10 @@ self.onmessage = (e) => {
   try {
     if (kind === 'optimize') {
       const teams = optimize(cards, box, { ...options, onProgress: progress });
-      self.postMessage({ id, result: teams.map(slimTeam) });
+      self.postMessage({ id, result: teams.map((t) => ({ ...slimTeam(t), fixes: weakFixes(cards, box, t) })) });
     } else if (kind === 'analyze') {
       const r = analyzeTeam(cards, box, options.leader, options.members, options.pairs);
-      self.postMessage({ id, result: r && { team: { ...slimTeam(r.team), bestPairs: r.team.bestPairs, bestScore: r.team.bestScore, userPairs: r.team.userPairs }, upgrades: r.upgrades, leaders: r.leaders } });
+      self.postMessage({ id, result: r && { team: { ...slimTeam(r.team), bestPairs: r.team.bestPairs, bestScore: r.team.bestScore, userPairs: r.team.userPairs }, upgrades: r.upgrades, leaders: r.leaders, fixes: r.fixes } });
     } else if (kind === 'fit') {
       const r = teamsWithCard(cards, box, options.cardId);
       self.postMessage({ id, result: { best: r.best, owned: r.owned, teams: r.teams.map((t) => ({ ...slimTeam(t), gain: t.gain })) } });

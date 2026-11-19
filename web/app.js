@@ -576,6 +576,28 @@ function shared(a, b) {
   return la.filter((l) => lb.includes(l));
 }
 
+// Par quoi remplacer les cartes faibles : une carte de la box (si elle existe) et une à aller chercher
+const WHY_FR = { 'pas boostée par le leader': 'pas boostée', 'peu de liens': 'peu de liens', 'hors méta': 'hors méta' };
+function fixesHtml(fixes, { apply = false } = {}) {
+  if (!fixes?.length) return '';
+  const pct = (x) => `${x.pct >= 0 ? '+' : ''}${x.pct.toFixed(1)} %`;
+  const row = (x, label, oldId) => {
+    const c = state.byId.get(x.id); if (!c) return '';
+    const note = x.pct < 0 ? 'un peu moins fort, mais bien mieux lié' : 'de puissance';
+    return `<div class="fix-row" data-id="${esc(x.id)}" role="button" tabindex="0">${art(c)}
+      <div><div class="fix-lbl ${label === 'box' ? 'good' : ''}">${label === 'box' ? '✓ Dans ta box' : 'À aller chercher'}</div>
+      <div class="nm">${esc(c.name)}${tierOf(c) ? ` <span class="tier-pill">${esc(tierOf(c))}</span>` : ''}</div>
+      <div class="sub">${esc(c.title)} · ${x.links.toFixed(1)} liens en moyenne</div>
+      ${apply && label === 'box' ? `<button class="small" data-replace="${esc(oldId)}:${esc(x.id)}" type="button">Remplacer</button>` : ''}</div>
+      <div class="gain${x.pct < 0 ? ' flat' : ''}">${pct(x)}<small>${note}</small></div></div>`;
+  };
+  return `<div class="fixes"><div class="group-h">Par quoi les remplacer</div>
+    ${fixes.map((f) => { const c = state.byId.get(f.id); return `<div class="fix">
+      <p class="fix-h">À la place de <b>${esc(c?.name || '')}</b> <span class="muted">(${esc(f.why.map((w) => WHY_FR[w] || w).join(', '))}${f.why.includes('peu de liens') ? ` : ${f.links.toFixed(1)} lien${f.links >= 2 ? 's' : ''} en moyenne` : ''})</span></p>
+      ${f.owned ? row(f.owned, 'box', f.id) : '<p class="muted small-text fix-none">Rien de mieux dans ta box pour cette place.</p>'}
+      ${f.buy ? row(f.buy, 'buy', f.id) : ''}</div>`; }).join('')}</div>`;
+}
+
 function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = null, savedIdx = null, markOwned = false, compact = false, extraTop = '', footer = '' } = {}) {
   const L = state.byId.get(t.leader);
   const units = t.units;
@@ -626,6 +648,7 @@ function teamHtml(t, i, { highlight = null, best = null, tag = null, saveIdx = n
     ${friendLine(t, L)}
     ${best && rel !== 100 ? `<p class="muted small-text" style="margin:0">${rel} % de ta meilleure team</p>` : ''}
     <ul class="why">${why.map((w) => `<li class="${w.ok ? '' : 'warn'}">${esc(w.txt)}</li>`).join('')}</ul>
+    ${fixesHtml(t.fixes, { apply: compact && !markOwned })}
     ${t.rotations.map((r, k) => { const names = shared(units[r[0]], units[r[1]]);
       return group(`Rotation ${k + 1}`, 'Ces 2 cartes jouent ensemble un tour sur deux.', [units[r[0]], units[r[1]]], '', linksDetail(names)); }).join('')}
     ${floaters.length ? group('Flottants', 'Elles prennent la 3e place à tour de rôle.', floaters) : ''}
@@ -824,7 +847,7 @@ document.addEventListener('click', (e) => {
   }
   const go = e.target.closest('[data-goto]');
   if (go) { switchTab(go.dataset.goto); return; }
-  const el = e.target.closest('#top-results .mini[data-id], #top-results .friends li[data-id], #mine .mini[data-id], #mine .friends li[data-id], #mine .tips li[data-id], #mine .link-plan li[data-id], #mine button.item[data-id], #opt-results .mini[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #meta .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
+  const el = e.target.closest('#top-results .mini[data-id], #top-results .friends li[data-id], #mine .mini[data-id], #mine .friends li[data-id], #mine .tips li[data-id], #mine .link-plan li[data-id], #mine button.item[data-id], #opt-results .mini[data-id], #opt-results .fix-row[data-id], #saved .fix-row[data-id], #opt-results .tips li[data-id], #opt-results .friends li[data-id], #opt-results .link-plan li[data-id], #saved .mini[data-id], #news .mini[data-id], #meta .mini[data-id], #saved .tips li[data-id], #saved .friends li[data-id], #saved .link-plan li[data-id], #watch-results .mini[data-id], #watch-results button.item[data-id]');
   if (el) openCard(el.dataset.id);
 });
 
@@ -1230,6 +1253,15 @@ async function runAnalysis() {
     const r = await run('analyze', { leader: t.leader, members: t.members, pairs });
     if (!r) { box.innerHTML = ''; return; }
     box.innerHTML = analysisHtml(t, r);
+    box.querySelectorAll('[data-replace]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      const [oldId, newId] = b.dataset.replace.split(':');
+      const k = t.members.indexOf(oldId); if (k < 0) return;
+      t.members[k] = newId;
+      const list = customs().filter((x) => x.id !== t.id);
+      state.box.__custom = [{ ...t }, ...list]; saveBox();
+      renderBuilder(); toast(`${state.byId.get(newId)?.name} mis à sa place`);
+    });
     $('#apply-rot')?.addEventListener('click', () => {
       const [r1, r2] = state.bestRotKeys;
       const p2 = r1.find((x) => x !== 'L');
@@ -1296,7 +1328,7 @@ function analysisHtml(t, r) {
       <h2 class="sec-h">Limites</h2><ul class="why">${cons.map((x) => `<li class="warn">${esc(x)}</li>`).join('') || '<li>Rien à signaler.</li>'}</ul>
     </section>
     ${rotationAdvice(t, r)}
-    ${teamHtml(T, 0, { tag: esc(t.name || 'Ma team'), compact: true })}
+    ${teamHtml({ ...T, fixes: r.fixes }, 0, { tag: esc(t.name || 'Ma team'), compact: true })}
     <h2 class="sec-h">Cartes à aller chercher</h2><p class="sec-p">Les cartes du jeu qui feraient le plus progresser cette team.</p>
     ${up || '<div class="empty">Aucune carte ne ferait mieux pour l\'instant.</div>'}
     <h2 class="sec-h">Leaders à aller chercher</h2><p class="sec-p">Avec les mêmes cartes, ces leaders rendraient la team plus forte.</p>
